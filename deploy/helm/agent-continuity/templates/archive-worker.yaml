@@ -1,0 +1,102 @@
+{{- if .Values.archive.enabled }}
+{{- if ne .Values.artifactStorage.backend "local" }}
+{{- fail "archive requires durable local/shared staging, not the legacy synchronous S3 backend" }}
+{{- end }}
+{{- if and (ne .Values.artifactStorage.accessMode "ReadWriteMany") (or (gt (int .Values.archive.workerReplicas) 1) .Values.archive.autoscaling.enabled) }}
+{{- fail "distributed archive workers require ReadWriteMany staging; dev ReadWriteOnce supports one worker on the API node" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agent-continuity.fullname" . }}-archive-worker
+  labels: {{- include "agent-continuity.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.archive.workerReplicas }}
+  revisionHistoryLimit: 2
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: archive-worker}
+  template:
+    metadata:
+      annotations:
+        continuity.agent-continuity.io/image-id: {{ .Values.image.buildID | quote }}
+        checksum/archive-config: {{ toJson .Values.archive.config | sha256sum }}
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: archive-worker
+        app.kubernetes.io/part-of: agent-continuity
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      {{- if ne .Values.artifactStorage.accessMode "ReadWriteMany" }}
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels: {{- include "agent-continuity.selectorLabels" . | nindent 18 }}
+      {{- end }}
+      containers:
+        - name: archive-worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [archive-worker]
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          envFrom:
+            - configMapRef: {name: {{ include "agent-continuity.fullname" . }}-config}
+          env:
+            - {name: GOMAXPROCS, value: "2"}
+            - {name: GOMEMLIMIT, value: 192MiB}
+            - name: CONTINUITY_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: {{ .Values.existingSecret }}, key: database-url}}
+            - name: CONTINUITY_JWT_SECRET
+              valueFrom: {secretKeyRef: {name: {{ .Values.existingSecret }}, key: jwt-secret}}
+            - name: CONTINUITY_BOOTSTRAP_TOKEN
+              valueFrom: {secretKeyRef: {name: {{ .Values.existingSecret }}, key: bootstrap-token}}
+            - name: CONTINUITY_MASTER_KEY
+              valueFrom: {secretKeyRef: {name: {{ .Values.existingSecret }}, key: master-key}}
+            {{- if .Values.archive.existingSecret }}
+            - {name: CONTINUITY_ARCHIVE_CONFIG_FILE, value: /run/archive/config.json}
+            {{- end }}
+          volumeMounts:
+            - {name: artifacts, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+            {{- if .Values.archive.existingSecret }}
+            - {name: archive-secrets, mountPath: /run/archive, readOnly: true}
+            {{- end }}
+            {{- if or .Values.archive.broker.install .Values.archive.broker.existingSecret }}
+            - {name: broker-secrets, mountPath: /run/archive-broker, readOnly: true}
+            {{- end }}
+          resources: {{- toYaml .Values.archive.workerResources | nindent 12 }}
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: {{ .Values.artifactStorage.existingClaim | default (printf "%s-artifacts" (include "agent-continuity.fullname" .)) }}
+        - name: tmp
+          emptyDir: {sizeLimit: 16Mi}
+        {{- if .Values.archive.existingSecret }}
+        - name: archive-secrets
+          secret: {secretName: {{ .Values.archive.existingSecret }}, defaultMode: 0440}
+        {{- end }}
+        {{- if or .Values.archive.broker.install .Values.archive.broker.existingSecret }}
+        - name: broker-secrets
+          secret: {secretName: {{ .Values.archive.broker.existingSecret | default (printf "%s-archive-broker" (include "agent-continuity.fullname" .)) }}, defaultMode: 0440}
+        {{- end }}
+{{- if .Values.archive.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "agent-continuity.fullname" . }}-archive-worker
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: {{ include "agent-continuity.fullname" . }}-archive-worker}
+  minReplicas: {{ .Values.archive.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.archive.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: {{ .Values.archive.autoscaling.targetCPUUtilizationPercentage }}}
+{{- end }}
+{{- end }}

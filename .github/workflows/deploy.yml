@@ -1,0 +1,74 @@
+name: Deploy
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Protected GitHub environment and Helm values profile
+        type: choice
+        options: [staging, production]
+        required: true
+      image_tag:
+        description: Immutable published image tag
+        type: string
+        required: true
+      canary:
+        description: Validate an isolated one-replica canary before rollout
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: agent-continuity-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version-file: go.mod, cache: true}
+      - uses: azure/setup-helm@v4
+      - uses: azure/setup-kubectl@v4
+      - name: Configure explicit cluster context
+        env:
+          KUBE_CONFIG_B64: ${{ secrets.KUBE_CONFIG_B64 }}
+          KUBE_CONTEXT: ${{ vars.KUBE_CONTEXT }}
+        run: |
+          test -n "$KUBE_CONFIG_B64" -a -n "$KUBE_CONTEXT"
+          printf %s "$KUBE_CONFIG_B64" | base64 --decode >"$RUNNER_TEMP/kubeconfig"
+          chmod 600 "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >>"$GITHUB_ENV"
+          echo "CONTINUITY_KUBE_CONTEXT=$KUBE_CONTEXT" >>"$GITHUB_ENV"
+          kubectl --context "$KUBE_CONTEXT" cluster-info
+      - name: Render release contract
+        run: |
+          helm lint deploy/helm/agent-continuity -f "deploy/environments/${{ inputs.environment }}/values.yaml"
+          helm template agent-continuity deploy/helm/agent-continuity -f "deploy/environments/${{ inputs.environment }}/values.yaml" --set image.repository="ghcr.io/${{ github.repository }}" --set image.tag="${{ inputs.image_tag }}" >/dev/null
+      - name: Deploy isolated canary
+        if: ${{ inputs.canary }}
+        run: |
+          helm upgrade --install agent-continuity-canary deploy/helm/agent-continuity --kube-context "$CONTINUITY_KUBE_CONTEXT" --namespace "agent-continuity-${{ inputs.environment }}" --create-namespace --values "deploy/environments/${{ inputs.environment }}/values.yaml" --set image.repository="ghcr.io/${{ github.repository }}" --set image.tag="${{ inputs.image_tag }}" --set replicaCount=1 --set autoscaling.enabled=false --set podDisruptionBudget.enabled=false --rollback-on-failure --wait --timeout 10m
+      - name: Canary smoke
+        if: ${{ inputs.canary }}
+        env:
+          CONTINUITY_ALLOW_NONLOCAL_K8S: "true"
+          CONTINUITY_NAMESPACE: agent-continuity-${{ inputs.environment }}
+          CONTINUITY_RELEASE: agent-continuity-canary
+        run: ./scripts/smoke-k8s-context.sh
+      - name: Rolling promotion
+        run: |
+          helm upgrade --install agent-continuity deploy/helm/agent-continuity --kube-context "$CONTINUITY_KUBE_CONTEXT" --namespace "agent-continuity-${{ inputs.environment }}" --create-namespace --values "deploy/environments/${{ inputs.environment }}/values.yaml" --set image.repository="ghcr.io/${{ github.repository }}" --set image.tag="${{ inputs.image_tag }}" --rollback-on-failure --wait --timeout 10m
+      - name: Post-rollout smoke
+        env:
+          CONTINUITY_ALLOW_NONLOCAL_K8S: "true"
+          CONTINUITY_NAMESPACE: agent-continuity-${{ inputs.environment }}
+          CONTINUITY_RELEASE: agent-continuity
+        run: ./scripts/smoke-k8s-context.sh
+      - name: Remove isolated canary
+        if: ${{ always() && inputs.canary }}
+        run: helm uninstall agent-continuity-canary --kube-context "$CONTINUITY_KUBE_CONTEXT" --namespace "agent-continuity-${{ inputs.environment }}" --wait || true

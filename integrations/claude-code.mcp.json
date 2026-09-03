@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "agent-continuity": {
+      "command": "agentcloud",
+      "args": ["mcp", "stdio"],
+      "env": {"AGENTCLOUD_API_URL": "http://127.0.0.1:18080"}
+    }
+  }
+}

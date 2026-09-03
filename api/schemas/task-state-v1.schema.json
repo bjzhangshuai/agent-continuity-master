@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-continuity.dev/schemas/task-state-v1.schema.json",
+  "title": "Universal Task State v1",
+  "type": "object",
+  "required": ["schema_version", "protocol_version", "capabilities", "task"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "protocol_version": {"const": "1.0"},
+    "capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "task": {"$ref": "#/$defs/task"},
+    "events": {"type": "array", "items": {"$ref": "#/$defs/event"}},
+    "artifact_manifests": {"type": "array", "items": {"$ref": "#/$defs/artifact"}},
+    "branches": {"type": "array", "items": {"$ref": "#/$defs/branch"}},
+    "participants": {"type": "array", "items": {"$ref": "#/$defs/participant"}},
+    "agent_bindings": {"type": "array", "items": {"$ref": "#/$defs/agentBinding"}},
+    "conflicts": {"type": "array", "items": {"$ref": "#/$defs/conflict"}},
+    "snapshots": {"type": "array", "items": {"$ref": "#/$defs/snapshot"}},
+    "extensions": {"type": "object", "additionalProperties": true}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "task": {
+      "type": "object",
+      "required": ["task_id", "account_id", "title", "objective", "status", "head_event_ids", "created_at", "updated_at"],
+      "properties": {
+        "task_id": {"type": "string", "minLength": 1},
+        "account_id": {"type": "string", "minLength": 1},
+        "organization_id": {"type": "string"},
+        "team_id": {"type": "string"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 200},
+        "objective": {"type": "string", "minLength": 1},
+        "status": {"enum": ["active", "paused", "completed", "archived"]},
+        "origin_device": {"type": "string"},
+        "head_event_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "metadata": {},
+        "created_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": true
+    },
+    "hlc": {
+      "type": "object",
+      "required": ["wall_time_ms", "counter", "node"],
+      "properties": {
+        "wall_time_ms": {"type": "integer", "minimum": 1},
+        "counter": {"type": "integer", "minimum": 0},
+        "node": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "event": {
+      "type": "object",
+      "required": ["event_id", "task_id", "branch_id", "account_id", "device_id", "parent_event_ids", "logical_time", "device_sequence", "event_type", "schema_version", "content_type", "content_digest", "created_at_client", "signature", "idempotency_key"],
+      "properties": {
+        "event_id": {"type": "string"}, "task_id": {"type": "string"}, "branch_id": {"type": "string"},
+        "account_id": {"type": "string"}, "participant_id": {"type": "string"}, "agent_id": {"type": "string"},
+        "provider_id": {"type": "string"}, "device_id": {"type": "string"}, "session_ref": {"type": "string"},
+        "parent_event_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "logical_time": {"$ref": "#/$defs/hlc"}, "device_sequence": {"type": "integer", "minimum": 1},
+        "server_sequence": {"type": "integer", "minimum": 1}, "event_type": {"type": "string", "pattern": "^[a-z0-9_-]+\\.[a-z0-9_.-]+$"},
+        "schema_version": {"type": "string"}, "content_type": {"type": "string"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "payload": {},
+        "artifact_refs": {"type": "array", "items": {"type": "string"}},
+        "created_at_client": {"type": "string", "format": "date-time"}, "received_at_server": {"type": "string", "format": "date-time"},
+        "signature": {"type": "string"}, "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 200},
+        "extensions": {"type": "object", "additionalProperties": true}
+      },
+      "additionalProperties": false
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["artifact_id", "task_id", "version_id", "content_type", "filename", "size", "content_hash", "storage_reference", "created_at"],
+      "properties": {
+        "artifact_id": {"type": "string"}, "task_id": {"type": "string"}, "account_id": {"type": "string"}, "version_id": {"type": "string"},
+        "parent_version_id": {"type": "string"}, "content_type": {"type": "string"}, "filename": {"type": "string"},
+        "size": {"type": "integer", "minimum": 0}, "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "chunk_manifest_hash": {"type": "string"}, "producer_type": {"type": "string"}, "producer_id": {"type": "string"},
+        "device_id": {"type": "string"}, "storage_reference": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"},
+        "metadata": {}, "encryption_metadata": {}
+      },
+      "additionalProperties": true
+    },
+    "branch": {
+      "type": "object",
+      "required": ["task_id", "branch_id", "name", "head_event_ids", "status", "created_by", "created_at"],
+      "properties": {
+        "task_id": {"type": "string"}, "branch_id": {"type": "string"}, "name": {"type": "string"},
+        "base_event_id": {"type": "string"}, "head_event_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "status": {"enum": ["active", "merged", "archived"]}, "created_by": {"type": "string"},
+        "created_at": {"type": "string", "format": "date-time"}, "merged_into": {"type": "string"}, "merged_at": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": false
+    },
+    "participant": {
+      "type": "object",
+      "required": ["participant_id", "task_id", "kind", "role", "status", "joined_at"],
+      "properties": {
+        "participant_id": {"type": "string"}, "task_id": {"type": "string"}, "account_id": {"type": "string"},
+        "agent_id": {"type": "string"}, "kind": {"enum": ["human", "agent", "service"]}, "role": {"type": "string"},
+        "status": {"enum": ["active", "left", "revoked"]}, "joined_at": {"type": "string", "format": "date-time"},
+        "left_at": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": false
+    },
+    "agentBinding": {
+      "type": "object",
+      "required": ["task_id", "agent_id", "participant_id", "resume_mode", "capabilities", "created_at"],
+      "properties": {
+        "task_id": {"type": "string"}, "agent_id": {"type": "string"}, "participant_id": {"type": "string"},
+        "native_session_ref": {"type": "string"}, "resume_mode": {"enum": ["native", "rehydrate", "unsupported"]},
+        "capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}, "metadata": {},
+        "created_at": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": false
+    },
+    "conflict": {
+      "type": "object",
+      "required": ["conflict_id", "task_id", "event_id", "kind", "strategy", "created_at", "resolved"],
+      "properties": {
+        "conflict_id": {"type": "string"}, "task_id": {"type": "string"}, "event_id": {"type": "string"},
+        "kind": {"type": "string"}, "strategy": {"type": "string"}, "details": {},
+        "created_at": {"type": "string", "format": "date-time"}, "resolved": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "snapshot": {
+      "type": "object",
+      "required": ["snapshot_id", "task_id", "branch_id", "through_server_sequence", "event_count", "state", "state_digest", "created_at"],
+      "properties": {
+        "snapshot_id": {"type": "string"}, "task_id": {"type": "string"}, "branch_id": {"type": "string"},
+        "through_server_sequence": {"type": "integer", "minimum": 0}, "event_count": {"type": "integer", "minimum": 0},
+        "state": {"type": "object", "additionalProperties": true}, "state_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "created_at": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

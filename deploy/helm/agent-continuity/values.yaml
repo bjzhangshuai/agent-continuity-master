@@ -1,0 +1,140 @@
+replicaCount: 1
+
+image:
+  repository: agent-continuity
+  tag: dev
+  pullPolicy: IfNotPresent
+  # Local same-tag builds set this to the immutable image ID so Kubernetes
+  # creates a new ReplicaSet. Release pipelines should normally use unique tags.
+  buildID: ""
+
+existingSecret: agent-continuity-secrets
+
+archive:
+  enabled: false
+  # For real cloud credentials, use a Secret with config.json and credential files.
+  existingSecret: ""
+  config: {}
+  workerReplicas: 1
+  workerResources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+  autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 16, targetCPUUtilizationPercentage: 70}
+  broker:
+    # Isolated single-node development broker. Production: Argo EventBus or an
+    # external 3/5-node JetStream cluster, with install=false and TLS credentials.
+    install: false
+    image: nats:2.12.15-alpine
+    size: 1Gi
+    existingSecret: ""
+    resources:
+      requests: {cpu: 25m, memory: 32Mi}
+      limits: {cpu: 250m, memory: 128Mi}
+
+treasury:
+  ownerAccountID: ""
+  demoEnabled: false
+  # Optional Secret containing config.json and the referenced Stripe key file.
+  existingSecret: ""
+
+payments:
+  demoEnabled: false
+  publicBaseURL: ""
+  # An existing Secret holding config.json, price-book.json and referenced PEM files.
+  existingSecret: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+
+config:
+  maxBodyBytes: 33554432
+  shutdownGrace: 15s
+  autoMigrate: false
+  dataResidency: ""
+
+artifactStorage:
+  backend: local
+  accessMode: ReadWriteOnce
+  existingClaim: ""
+  size: 1Gi
+  storageClassName: ""
+  s3:
+    endpoint: ""
+    bucket: ""
+    region: us-east-1
+    autoCreate: false
+
+observability:
+  otlpTracesEndpoint: ""
+
+enterpriseIdentity:
+  oidc:
+    issuer: ""
+    audience: ""
+    organizationID: ""
+    autoProvision: false
+  scim:
+    organizationID: ""
+
+backup:
+  enabled: false
+  schedule: "17 2 * * *"
+  existingPVC: ""
+  retentionDays: 14
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+postgresql:
+  enabled: true
+  image: postgres:16-alpine
+  storage:
+    size: 1Gi
+    storageClassName: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+ingress:
+  enabled: false
+  className: ""
+  host: continuity.local
+  annotations: {}
+  tls: []
+
+networkPolicy:
+  enabled: true
+  # Kubernetes NetworkPolicy cannot match DNS names. Production deployments
+  # must explicitly list CIDRs/ports for external S3, KMS, and OTLP endpoints.
+  externalEgress: []
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+platform:
+  superAdminAccountIDs: ""

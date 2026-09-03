@@ -1,0 +1,645 @@
+openapi: 3.1.0
+info:
+  title: Agent Continuity API
+  version: 0.1.0
+  description: Versioned control, sync, collaboration, developer-platform, MCP, A2A, and Connect API.
+servers: [{url: 'http://127.0.0.1:8080'}]
+security: [{bearerAuth: []}, {portalSession: []}]
+paths:
+  /v1/storage/config:
+    get:
+      summary: Non-sensitive archive configuration (no cloud credentials)
+      responses: {'200': {description: Enabled flag, provider IDs and worker limits}, '401': {$ref: '#/components/responses/Error'}}
+  /v1/tasks/{taskID}/contents:
+    post:
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      description: Upload at most 8 MiB decoded content. Requires task write access. Persist and reuse artifact_id/version_id for retries. Acceptance is not cloud completion; poll storage-jobs. Larger files use resumable artifact uploads.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [artifact_id, version_id, filename, content_type, content_base64]
+              properties:
+                artifact_id: {type: string}
+                version_id: {type: string}
+                parent_version_id: {type: string}
+                filename: {type: string}
+                content_type: {type: string}
+                content_base64: {type: string, contentEncoding: base64, maxLength: 11184812}
+      responses: {'201': {description: Artifact accepted and durable Outbox committed if archival enabled}, '403': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}, '413': {$ref: '#/components/responses/Error'}, '503': {description: Outbox full, retry later}, '507': {description: Durable staging full}}
+  /v1/tasks/{taskID}/storage-jobs:
+    get:
+      parameters: [{$ref: '#/components/parameters/TaskID'}, {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}]
+      description: Authorized task/attachment jobs, paginated at 100. Follow next_after while has_more.
+      responses: {'200': {description: jobs, next_after, has_more; states queued/processing/retry/stored/dead}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/tasks/{taskID}/storage-jobs/{jobID}:
+    get:
+      parameters: [{$ref: '#/components/parameters/TaskID'}, {name: jobID, in: path, required: true, schema: {type: integer, format: int64}}]
+      responses: {'200': {description: Archive job and redacted error code}, '403': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/tasks/{taskID}/storage-jobs/{jobID}/content:
+    get:
+      parameters: [{$ref: '#/components/parameters/TaskID'}, {name: jobID, in: path, required: true, schema: {type: integer, format: int64}}]
+      description: Proxy private cloud content only after stored; bounded size and verified SHA-256. Same task and artifact permissions as original content.
+      responses: {'200': {description: Binary content}, '409': {description: Not stored yet}, '503': {description: Cloud read unavailable or integrity failure}}
+  /v1/tasks/{taskID}/storage-jobs/{jobID}/retry:
+    post:
+      parameters: [{$ref: '#/components/parameters/TaskID'}, {name: jobID, in: path, required: true, schema: {type: integer, format: int64}}]
+      description: Task admin and artifact permission required. Replay only dead-letter jobs.
+      responses: {'202': {description: Queued for replay}, '403': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/tasks/{taskID}/storage-backfill:
+    post:
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      description: Task administrator explicitly archives at most 100 historical events/artifacts. No automatic historical export.
+      responses: {'202': {description: enqueued and batch_limit}, '403': {$ref: '#/components/responses/Error'}, '503': {description: Outbox full}}
+  /v1/auth/login:
+    post:
+      security: []
+      description: Same-origin account login. HTTPS required outside loopback. Sets an HttpOnly SameSite=Strict cookie; 30 minute idle and 8 hour absolute expiry. All cookie-authenticated unsafe requests require X-Portal-Request=1.
+      parameters: [{$ref: '#/components/parameters/PortalRequest'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [username,password], properties: {username: {type: string}, password: {type: string, format: password, maxLength: 72}}}}}}
+      responses: {'200': {description: Account identity and expiry; session cookie set}, '401': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
+  /v1/auth/session/logout:
+    post:
+      security: [{portalSession: []}]
+      parameters: [{$ref: '#/components/parameters/PortalRequest'}]
+      responses: {'204': {description: Browser session revoked}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/portal/session:
+    get:
+      description: Current identity, direct tenant memberships, independent scoped platform grants, visible mandates and metadata. Hierarchy does not grant tenant content or payment access.
+      responses: {'200': {description: Scoped portal identity}, '401': {$ref: '#/components/responses/Error'}}
+  /v1/portal/users:
+    post:
+      description: Interactive account only; superadmin provisions an independent account, or tenant owner provisions a member. self=true creates the caller's first password login. Password is never returned.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [username,password,display_name], properties: {username: {type: string, pattern: '^[a-z0-9][a-z0-9._@-]{2,79}$'}, password: {type: string, format: password, description: 12 to 72 UTF-8 bytes}, display_name: {type: string}, tenant_id: {type: string}, role: {enum: [admin,billing,member,viewer]}, self: {type: boolean, default: false}}}}}}
+      responses: {'201': {description: Account ID and login name}, '403': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/portal/tenants:
+    post:
+      description: Create tenant with immutable parent and owner; maximum depth 8. Parent owner or scoped platform delegate required for children. No implicit content membership for a platform creator assigning another owner.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [name,slug], properties: {name: {type: string}, slug: {type: string}, parent_id: {type: string}, owner_account_id: {type: string}, plan: {type: string}}}}}}
+      responses: {'201': {description: Tenant created}, '403': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/portal/grants:
+    post:
+      description: Interactive platform delegation; scope cannot exceed active parent grant. Only configured superadmins may originate a grant without a parent. No tenant content or merchant payout rights implied.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [account_id,tenant_id,role], properties: {account_id: {type: string}, tenant_id: {type: string, description: Tenant subtree ID or '*'}, role: {enum: [admin,operations,support,finance,auditor]}, parent_id: {type: string}}}}}}
+      responses: {'201': {description: Grant created}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/portal/grants/{grantID}/revoke:
+    post:
+      parameters: [{name: grantID, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Grant and dependent grant chain ineffective}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/portal/tenants/{tenantID}/metadata:
+    patch:
+      parameters: [{$ref: '#/components/parameters/TenantID'}]
+      description: Scoped platform admin or operations updates display name only; no hierarchy or billing history rewrite.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [name], properties: {name: {type: string}}}}}}
+      responses: {'200': {description: Tenant metadata updated}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/portal/tenants/{tenantID}/finance-summary:
+    get:
+      parameters: [{$ref: '#/components/parameters/TenantID'}]
+      description: Scoped platform finance or admin aggregate only; separate currency, environment and status. Does not return tenant checkout links.
+      responses: {'200': {description: Bounded financial aggregate}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/portal/tenants/{tenantID}/billing:
+    get:
+      parameters: [{$ref: '#/components/parameters/TenantID'}]
+      description: Direct tenant owner/admin/billing only. Includes tenant's service invoices and frozen liabilities explicitly accepted from children. Admin is read-only; only owner/billing may pay.
+      responses: {'200': {description: Billing account, latest 200 invoices, tenant names, separated outstanding totals and can_pay}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/portal/tenants/{tenantID}/billing-account:
+    post:
+      parameters: [{$ref: '#/components/parameters/TenantID'}]
+      description: Tenant owner creates canonical tenant billing account, or retrieves the existing account.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [currency], properties: {currency: {enum: [CNY,USD,EUR]}}}}}}
+      responses: {'200': {description: Existing billing account}, '201': {description: Created billing account}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/portal/tenants/{tenantID}/quote:
+    post:
+      parameters: [{$ref: '#/components/parameters/TenantID'}]
+      description: Tenant owner/billing previews all tenant members' usage; does not issue an invoice.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TenantInvoicePeriod'}}}}
+      responses: {'200': {description: Usage quote}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/portal/tenants/{tenantID}/invoices:
+    post:
+      parameters: [{$ref: '#/components/parameters/TenantID'}, {name: Idempotency-Key, in: header, required: true, schema: {type: string}}]
+      description: Tenant owner/billing issues one immutable invoice for all tenant usage. Overlapping periods rejected. Active mandate is rechecked at database commit; liability is then frozen.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TenantInvoicePeriod'}}}}
+      responses: {'201': {description: Immutable tenant bill, content: {application/json: {schema: {$ref: '#/components/schemas/BillingDocument'}}}}, '403': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/portal/mandates:
+    post:
+      description: Child tenant owner requests ancestor payment; pending until payer owner accepts. One pending or active mandate per service tenant.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [tenant_id,payer_tenant_id], properties: {tenant_id: {type: string}, payer_tenant_id: {type: string}}}}}}
+      responses: {'201': {description: Pending payment mandate}, '403': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/portal/mandates/{mandateID}/{action}:
+    post:
+      parameters: [{name: mandateID, in: path, required: true, schema: {type: string}}, {name: action, in: path, required: true, schema: {enum: [accept,revoke]}}]
+      description: Payer owner accepts; either tenant owner may revoke future delegation. Existing invoices retain their frozen payer liability.
+      responses: {'200': {description: Updated mandate}, '403': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/treasury/receivables:
+    get:
+      description: Configured merchant operator only; latest 200 paid invoice candidates with checkout authority redacted. Not tenant content access.
+      responses: {'200': {description: Read-only paid billing documents}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/treasury/receivables/{invoiceID}:
+    get:
+      parameters: [{name: invoiceID, in: path, required: true, schema: {type: string}}]
+      description: Merchant-only financial evidence. can_pay=false; payment links and checkout fields redacted.
+      responses: {'200': {description: Read-only original billing document}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/treasury/receivables/{invoiceID}/export:
+    get:
+      parameters: [{name: invoiceID, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Merchant-only invoice CSV including tenant liability and mandate, content: {text/csv: {schema: {type: string}}}}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/treasury/receivables/{invoiceID}/receipts/{receiptID}:
+    get:
+      parameters: [{name: invoiceID, in: path, required: true, schema: {type: string}}, {name: receiptID, in: path, required: true, schema: {type: string}}, {name: format, in: query, schema: {enum: [html,json]}}]
+      responses: {'200': {description: Merchant-only receipt; HTML includes service tenant, liable tenant and initiating account}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/treasury:
+    get:
+      description: Operator-only treasury. Requires configured owner account and treasury:read. Demo balance is derived from verified demo receipts, never a customer wallet or live funds.
+      responses: {'200': {description: Document, derived balances and supported routes}, '403': {$ref: '#/components/responses/Error'}, '503': {$ref: '#/components/responses/Error'}}
+  /v1/treasury/collections/import:
+    post:
+      description: treasury:write; configured merchant imports a single confirmed paid demo receipt once, including tenant or delegated group payments. Real receipts are rejected; no tenant payment authority is granted.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [invoice_id], properties: {invoice_id: {type: string}}}}}}
+      responses: {'200': {description: Treasury document}, '422': {$ref: '#/components/responses/Error'}}
+  /v1/treasury/collections/{collectionID}/settle-demo:
+    post:
+      parameters: [{name: collectionID, in: path, required: true, schema: {type: string}}]
+      description: treasury:write; simulation-only settlement from pending to available net balance.
+      responses: {'200': {description: Treasury document}}
+  /v1/treasury/destinations:
+    post:
+      description: treasury:write; virtual destinations only. No raw bank numbers, wallet addresses or real ownership claims accepted.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [kind,label,currency], properties: {kind: {enum: [bank,alipay,paypal]}, label: {type: string, maxLength: 120}, currency: {enum: [CNY,USD,EUR]}}}}}}
+      responses: {'200': {description: Treasury document with unverified virtual destination}}
+  /v1/treasury/destinations/{destinationID}/verify-demo:
+    post:
+      parameters: [{name: destinationID, in: path, required: true, schema: {type: string}}]
+      description: treasury:approve; simulates verification, never verifies a real bank account.
+      responses: {'200': {description: Treasury document}}
+  /v1/treasury/stripe/snapshot:
+    get:
+      parameters: [{name: currency, in: query, required: true, schema: {enum: [CNY,USD,EUR]}}]
+      description: treasury:read; provider-authenticated own merchant balance and default bank. Requires manual payout schedule; sandbox/live configuration is separate from demo funds.
+      responses: {'200': {description: Timestamped provider snapshot and masked destination}, '503': {$ref: '#/components/responses/Error'}}
+  /v1/treasury/payouts:
+    post:
+      description: treasury:write; reserve available funds and freeze amount and destination. Operator-only, not marketplace disbursement. Live approval must use a different subject.
+      parameters: [{name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 120}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [destination_id,amount_minor,currency,provider], properties: {destination_id: {type: string}, amount_minor: {type: integer, minimum: 1, maximum: 100000000}, currency: {enum: [CNY,USD,EUR]}, provider: {enum: [demo,stripe]}}}}}}
+      responses: {'200': {description: Treasury document; repeated same key returns original request}, '409': {$ref: '#/components/responses/Error'}, '422': {$ref: '#/components/responses/Error'}}
+  /v1/treasury/payouts/{payoutID}/decision:
+    post:
+      parameters: [{name: payoutID, in: path, required: true, schema: {type: string}}]
+      description: treasury:approve; requested to approved/rejected/canceled, or approved to canceled. No cancellation after submission.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [decision], properties: {decision: {enum: [approve,reject,cancel]}}}}}}
+      responses: {'200': {description: Treasury document}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/treasury/payouts/{payoutID}/submit:
+    post:
+      parameters: [{name: payoutID, in: path, required: true, schema: {type: string}}]
+      description: treasury:approve; submit approved immutable request once. Unknown outcomes stay reserved and must be reconciled using original payout ID.
+      responses: {'200': {description: Treasury document}, '409': {$ref: '#/components/responses/Error'}, '503': {$ref: '#/components/responses/Error'}}
+  /v1/treasury/payouts/{payoutID}/reconcile:
+    post:
+      parameters: [{name: payoutID, in: path, required: true, schema: {type: string}}]
+      description: treasury:write; Stripe query or original-key retry within 23 hours when create outcome is unknown. Can record a later return without deleting prior receipts.
+      responses: {'200': {description: Treasury document}}
+  /v1/treasury/payouts/{payoutID}/simulate:
+    post:
+      parameters: [{name: payoutID, in: path, required: true, schema: {type: string}}]
+      description: treasury:write; simulation only. Cannot affect sandbox or live payouts.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [outcome], properties: {outcome: {enum: [paid,failed,returned]}}}}}}
+      responses: {'200': {description: Treasury document}}
+  /v1/treasury/payouts/{payoutID}/receipt:
+    get:
+      parameters: [{name: payoutID, in: path, required: true, schema: {type: string}}]
+      description: treasury:read; payout history record only, not a tax invoice or independent bank confirmation. Returned status is displayed on historical receipts.
+      responses: {'200': {description: Printable payout record, content: {text/html: {schema: {type: string}}}}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/treasury/export:
+    get:
+      description: treasury:read; immutable collection and outgoing-payout amounts with environment, status and masked destination. CSV formula injection neutralized.
+      responses: {'200': {description: Treasury CSV, content: {text/csv: {schema: {type: string}}}}}
+  /v1/health/live:
+    get: {security: [], responses: {'200': {description: Live}}}
+  /v1/health/ready:
+    get: {security: [], responses: {'200': {description: Ready}, '503': {$ref: '#/components/responses/Error'}}}
+  /metrics:
+    get: {security: [], responses: {'200': {description: Prometheus metrics, content: {text/plain: {schema: {type: string}}}}}}
+  /v1/accounts:
+    post:
+      security: [{bootstrapToken: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [name], properties: {name: {type: string}}}}}}
+      responses: {'201': {description: Account created, content: {application/json: {schema: {$ref: '#/components/schemas/Account'}}}}, '401': {$ref: '#/components/responses/Error'}}
+  /v1/auth/token:
+    post:
+      security: [{bootstrapToken: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [account_id, subject], properties: {account_id: {type: string}, subject: {type: string}, ttl_seconds: {type: integer, minimum: 60, maximum: 3600}}}}}}
+      responses: {'200': {description: Short-lived access token}, '401': {$ref: '#/components/responses/Error'}}
+  /v1/auth/refresh:
+    post: {security: [], responses: {'200': {description: Rotated access and refresh tokens}, '401': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}}
+  /v1/auth/logout:
+    post: {security: [], responses: {'204': {description: Refresh-token family revoked}}}
+  /v1/auth/sso/exchange:
+    post:
+      security: []
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [id_token], properties: {id_token: {type: string}}}}}}
+      responses: {'200': {description: OIDC identity exchanged for rotated platform credentials}, '401': {$ref: '#/components/responses/Error'}, '403': {$ref: '#/components/responses/Error'}}
+  /v1/api-keys:
+    get: {responses: {'200': {description: API keys without secret material}}}
+    post: {responses: {'201': {description: API key and one-time secret}}}
+  /v1/api-keys/{keyID}:
+    delete: {parameters: [{name: keyID, in: path, required: true, schema: {type: string}}], responses: {'204': {description: API key revoked}}}
+  /v1/audit/events:
+    get: {responses: {'200': {description: Account audit trail}}}
+  /v1/notifications:
+    get: {responses: {'200': {description: Durable notifications}}}
+  /v1/notifications/{notificationID}/read:
+    post: {parameters: [{name: notificationID, in: path, required: true, schema: {type: string}}], responses: {'204': {description: Notification marked read}}}
+  /v1/devices:
+    get:
+      parameters: [{name: include_revoked, in: query, schema: {type: boolean, default: false}}]
+      responses: {'200': {description: Account devices}}
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [name, public_key], properties: {device_id: {type: string}, name: {type: string}, public_key: {type: string}}}}}}
+      responses: {'201': {description: Device registered}, '400': {$ref: '#/components/responses/Error'}}
+  /v1/devices/{deviceID}:
+    delete:
+      parameters: [{$ref: '#/components/parameters/DeviceID'}]
+      responses: {'204': {description: Revoked}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/agents:
+    get: {responses: {'200': {description: Registered Agent profiles}}}
+    post: {responses: {'201': {description: Agent profile created}}}
+  /v1/agents/{agentID}:
+    delete: {parameters: [{name: agentID, in: path, required: true, schema: {type: string}}], responses: {'204': {description: Agent revoked}}}
+  /v1/tasks:
+    get:
+      description: Returns the light task index without event or Artifact payloads.
+      responses: {'200': {description: Task index}}
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [title, objective], properties: {title: {type: string}, objective: {type: string}, origin_device: {type: string}, organization_id: {type: string}, team_id: {type: string}, metadata: {}}}}}}
+      responses: {'201': {description: Task created, content: {application/json: {schema: {$ref: '#/components/schemas/Task'}}}}}
+  /v1/tasks/{taskID}:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'200': {description: Task}, '403': {$ref: '#/components/responses/Error'}}}
+  /v1/tasks/{taskID}/events:
+    get:
+      parameters: [{$ref: '#/components/parameters/TaskID'}, {name: after, in: query, schema: {type: integer}}, {name: include_payload, in: query, schema: {type: boolean, default: true}}]
+      responses: {'200': {description: Cursor-ordered events}}
+    post:
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './schemas/task-state-v1.schema.json#/$defs/event'}}}}
+      responses: {'201': {description: Event accepted}, '200': {description: Duplicate accepted idempotently}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/tasks/{taskID}/branches:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'200': {description: Task DAG branches}}}
+    post: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'201': {description: Branch created}}}
+  /v1/tasks/{taskID}/branches/{branchID}/events:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/BranchID'}], responses: {'200': {description: Branch event history}}}
+  /v1/tasks/{taskID}/branches/{branchID}/merge:
+    post: {parameters: [{$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/BranchID'}], responses: {'200': {description: Signed merge event accepted with provenance}, '409': {$ref: '#/components/responses/Error'}}}
+  /v1/tasks/{taskID}/conflicts:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'200': {description: Open or resolved conflicts}}}
+  /v1/tasks/{taskID}/conflicts/{conflictID}/resolve:
+    post: {parameters: [{$ref: '#/components/parameters/TaskID'}, {name: conflictID, in: path, required: true, schema: {type: string}}], responses: {'200': {description: Conflict explicitly resolved}}}
+  /v1/tasks/{taskID}/branches/{branchID}/snapshots:
+    post: {parameters: [{$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/BranchID'}], responses: {'201': {description: Snapshot rebuilt from the event DAG}}}
+  /v1/tasks/{taskID}/branches/{branchID}/snapshots/latest:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/BranchID'}], responses: {'200': {description: Digest-verified latest snapshot}}}
+  /v1/tasks/{taskID}/devices:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'200': {description: Active encryption-capable task devices}}}
+  /v1/tasks/{taskID}/participants:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'200': {description: Human and Agent participants}}}
+  /v1/tasks/{taskID}/participants/{participantID}:
+    delete: {parameters: [{$ref: '#/components/parameters/TaskID'}, {name: participantID, in: path, required: true, schema: {type: string}}], responses: {'204': {description: Participant left or was removed}}}
+  /v1/tasks/{taskID}/agents:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'200': {description: Task Agent bindings}}}
+    post: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'201': {description: Agent bound with native or rehydrate mode}}}
+  /v1/tasks/{taskID}/presence:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'200': {description: Ephemeral task-room presence}}}
+  /v1/tasks/{taskID}/realtime:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'101': {description: WebSocket wake-up stream; cursor pull remains authoritative}}}
+  /v1/tasks/{taskID}/keys:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'200': {description: Device-wrapped Task key set}}}
+    post: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'201': {description: New Task key version stored}}}
+  /v1/tasks/{taskID}/artifacts:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'200': {description: Manifests only}}}
+  /v1/tasks/{taskID}/artifacts/{artifactID}:
+    put:
+      parameters: [{$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/ArtifactID'}, {name: X-Content-SHA256, in: header, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/octet-stream: {schema: {type: string, contentEncoding: binary}}}}
+      responses: {'201': {description: Verified Artifact stored}, '422': {$ref: '#/components/responses/Error'}}
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/ArtifactID'}], responses: {'200': {description: Lazy Artifact blob}}}
+  /v1/tasks/{taskID}/artifact-uploads:
+    post: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'201': {description: Resumable upload session created}}}
+  /v1/artifact-uploads/{uploadID}:
+    get: {parameters: [{name: uploadID, in: path, required: true, schema: {type: string}}], responses: {'200': {description: Upload session and received chunk indexes}}}
+  /v1/artifact-uploads/{uploadID}/chunks/{chunkIndex}:
+    put: {parameters: [{name: uploadID, in: path, required: true, schema: {type: string}}, {name: chunkIndex, in: path, required: true, schema: {type: integer, minimum: 0}}], responses: {'200': {description: Hash-verified chunk stored}}}
+  /v1/artifact-uploads/{uploadID}/complete:
+    post: {parameters: [{name: uploadID, in: path, required: true, schema: {type: string}}], responses: {'201': {description: CAS Artifact assembled}, '409': {$ref: '#/components/responses/Error'}}}
+  /v1/tasks/{taskID}/artifacts/{artifactID}/versions:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/ArtifactID'}], responses: {'200': {description: Artifact version graph}}}
+  /v1/tasks/{taskID}/artifacts/{artifactID}/permissions:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/ArtifactID'}], responses: {'200': {description: Artifact ACL}}}
+  /v1/tasks/{taskID}/invitations:
+    post: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'201': {description: One-time invitation token}}}
+  /v1/tasks/{taskID}/qr-invitations:
+    post: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'201': {description: Device-signed one-time invitation plus self-contained SVG QR rendering}, '409': {$ref: '#/components/responses/Error'}}}
+  /v1/tasks/{taskID}/permissions:
+    get: {parameters: [{$ref: '#/components/parameters/TaskID'}], responses: {'200': {description: Explicit task permission grants visible to task administrators}}}
+  /v1/tasks/{taskID}/permissions/{accountID}:
+    put: {parameters: [{$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/AccountID'}], responses: {'200': {description: Direct task permission granted or updated}}}
+    delete: {parameters: [{$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/AccountID'}], responses: {'204': {description: Direct permission revoked and participant deactivated}, '403': {$ref: '#/components/responses/Error'}}}
+  /v1/invitations/accept:
+    post: {responses: {'200': {description: Invitation accepted}, '410': {$ref: '#/components/responses/Error'}}}
+  /v1/invitations/{invitationID}:
+    delete: {parameters: [{name: invitationID, in: path, required: true, schema: {type: string}}], responses: {'204': {description: Revoked}}}
+  /v1/tasks/{taskID}/continuity-package:
+    get:
+      parameters: [{$ref: '#/components/parameters/TaskID'}, {name: agent, in: query, schema: {type: string, default: generic}}]
+      responses: {'200': {description: Rehydrate package}}
+  /v1/organizations:
+    get: {responses: {'200': {description: Organizations visible to the account}}}
+    post: {responses: {'201': {description: Organization and owner membership created}}}
+  /v1/organizations/{organizationID}:
+    parameters: [{$ref: '#/components/parameters/OrganizationID'}]
+    get: {responses: {'200': {description: Organization}}}
+    put: {responses: {'200': {description: Organization updated}}}
+    delete: {responses: {'204': {description: Empty organization deleted}, '409': {$ref: '#/components/responses/Error'}}}
+  /v1/organizations/{organizationID}/members:
+    get: {parameters: [{$ref: '#/components/parameters/OrganizationID'}], responses: {'200': {description: Active members}}}
+  /v1/organizations/{organizationID}/members/{accountID}:
+    put: {parameters: [{$ref: '#/components/parameters/OrganizationID'}, {$ref: '#/components/parameters/AccountID'}], responses: {'200': {description: Membership created or updated}}}
+    delete: {parameters: [{$ref: '#/components/parameters/OrganizationID'}, {$ref: '#/components/parameters/AccountID'}], responses: {'204': {description: Membership removed}}}
+  /v1/organizations/{organizationID}/teams:
+    get: {parameters: [{$ref: '#/components/parameters/OrganizationID'}], responses: {'200': {description: Teams}}}
+    post: {parameters: [{$ref: '#/components/parameters/OrganizationID'}], responses: {'201': {description: Team created}}}
+  /v1/organizations/{organizationID}/teams/{teamID}:
+    put: {parameters: [{$ref: '#/components/parameters/OrganizationID'}, {name: teamID, in: path, required: true, schema: {type: string}}], responses: {'200': {description: Team updated}}}
+    delete: {parameters: [{$ref: '#/components/parameters/OrganizationID'}, {name: teamID, in: path, required: true, schema: {type: string}}], responses: {'204': {description: Empty team deleted}}}
+  /v1/organizations/{organizationID}/teams/{teamID}/members:
+    get: {parameters: [{$ref: '#/components/parameters/OrganizationID'}, {name: teamID, in: path, required: true, schema: {type: string}}], responses: {'200': {description: Team members}}}
+  /v1/organizations/{organizationID}/teams/{teamID}/members/{accountID}:
+    put: {parameters: [{$ref: '#/components/parameters/OrganizationID'}, {name: teamID, in: path, required: true, schema: {type: string}}, {$ref: '#/components/parameters/AccountID'}], responses: {'200': {description: Team membership updated}}}
+    delete: {parameters: [{$ref: '#/components/parameters/OrganizationID'}, {name: teamID, in: path, required: true, schema: {type: string}}, {$ref: '#/components/parameters/AccountID'}], responses: {'204': {description: Team member removed}}}
+  /v1/organizations/{organizationID}/policies:
+    get: {parameters: [{$ref: '#/components/parameters/OrganizationID'}], responses: {'200': {description: RBAC and ABAC policies}}}
+    post: {parameters: [{$ref: '#/components/parameters/OrganizationID'}], responses: {'201': {description: Access policy created}}}
+  /v1/organizations/{organizationID}/policies/{policyID}:
+    delete: {parameters: [{$ref: '#/components/parameters/OrganizationID'}, {name: policyID, in: path, required: true, schema: {type: string}}], responses: {'204': {description: Policy deleted}}}
+  /v1/tasks/{taskID}/artifacts/{artifactID}/permissions/{accountID}:
+    put: {parameters: [{$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/ArtifactID'}, {$ref: '#/components/parameters/AccountID'}], responses: {'200': {description: Artifact ACL updated}}}
+    delete: {parameters: [{$ref: '#/components/parameters/TaskID'}, {$ref: '#/components/parameters/ArtifactID'}, {$ref: '#/components/parameters/AccountID'}], responses: {'204': {description: Artifact ACL removed}}}
+  /v1/oauth/clients:
+    get: {responses: {'200': {description: OAuth clients}}}
+    post: {responses: {'201': {description: OAuth client and one-time secret}}}
+  /v1/oauth/clients/{clientID}:
+    delete: {parameters: [{name: clientID, in: path, required: true, schema: {type: string}}], responses: {'204': {description: OAuth client revoked}}}
+  /v1/oauth/token:
+    post:
+      security: [{oauthClient: []}]
+      requestBody: {required: true, content: {application/x-www-form-urlencoded: {schema: {type: object, required: [grant_type], properties: {grant_type: {const: client_credentials}, scope: {type: string}}}}}}
+      responses: {'200': {description: Scoped access token}, '401': {$ref: '#/components/responses/Error'}}
+  /v1/webhooks:
+    get: {responses: {'200': {description: Webhook endpoints}}}
+    post: {responses: {'201': {description: Webhook and one-time signing secret}}}
+  /v1/webhooks/{webhookID}:
+    delete: {parameters: [{name: webhookID, in: path, required: true, schema: {type: string}}], responses: {'204': {description: Webhook disabled}}}
+  /v1/usage:
+    get: {responses: {'200': {description: Idempotent metering records}}}
+  /v1/billing/accounts:
+    get: {responses: {'200': {description: Personal and organization billing accounts}}}
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [plan], properties: {organization_id: {type: string}, plan: {enum: [free, pro, team, enterprise, developer]}, currency: {type: string, pattern: '^[A-Z]{3}$'}}}}}}
+      responses: {'201': {description: Billing account created}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/billing/providers:
+    get:
+      operationId: listPaymentProviders
+      responses: {'200': {description: Non-secret provider capabilities and versioned price book}}
+  /v1/billing/quote:
+    post:
+      operationId: quoteInvoice
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InvoiceRequest'}}}}
+      responses: {'200': {description: Full-window consumption quote, content: {application/json: {schema: {$ref: '#/components/schemas/BillingInvoice'}}}}, '400': {$ref: '#/components/responses/Error'}}
+  /v1/billing/invoices:
+    get:
+      operationId: listInvoices
+      parameters: [{name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}]
+      responses: {'200': {description: Account-scoped invoices, content: {application/json: {schema: {type: object, properties: {invoices: {type: array, items: {$ref: '#/components/schemas/BillingDocument'}}}}}}}}
+    post:
+      operationId: issueInvoice
+      parameters: [{$ref: '#/components/parameters/BillingIdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InvoiceRequest'}}}}
+      responses: {'201': {description: Immutable invoice snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/BillingDocument'}}}}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/billing/invoices/{invoiceID}:
+    get:
+      operationId: getInvoice
+      parameters: [{$ref: '#/components/parameters/InvoiceID'}]
+      responses: {'200': {description: Invoice with payments receipts audit events and active payment_links, content: {application/json: {schema: {$ref: '#/components/schemas/BillingDocument'}}}}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/billing/invoices/{invoiceID}/export:
+    get:
+      operationId: exportInvoiceCharges
+      parameters: [{$ref: '#/components/parameters/InvoiceID'}]
+      responses: {'200': {description: CSV consumption snapshot, content: {text/csv: {schema: {type: string}}}}}
+  /v1/billing/invoices/{invoiceID}/void:
+    post:
+      operationId: voidInvoice
+      parameters: [{$ref: '#/components/parameters/InvoiceID'}]
+      responses: {'200': {description: Invoice voided only when no payment attempt exists}, '400': {$ref: '#/components/responses/Error'}}
+  /v1/billing/invoices/{invoiceID}/payments:
+    post:
+      operationId: createPayment
+      parameters: [{$ref: '#/components/parameters/InvoiceID'}, {$ref: '#/components/parameters/BillingIdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [provider], properties: {provider: {type: string, examples: [wechat, alipay, paypal, stripe, demo]}}}}}}
+      responses: {'201': {description: Durable payment and limited capability link, content: {application/json: {schema: {type: object, properties: {payment: {$ref: '#/components/schemas/BillingPayment'}, payment_link: {type: string, format: uri}, invoice: {$ref: '#/components/schemas/BillingInvoice'}}}}}}, '409': {$ref: '#/components/responses/Error'}, '502': {$ref: '#/components/responses/Error'}}
+  /v1/billing/invoices/{invoiceID}/payments/{paymentID}/reconcile:
+    post:
+      operationId: reconcilePayment
+      parameters: [{$ref: '#/components/parameters/InvoiceID'}, {$ref: '#/components/parameters/PaymentID'}]
+      responses: {'200': {description: Queried provider state; APPROVED PayPal orders are captured idempotently}, '502': {$ref: '#/components/responses/Error'}}
+  /v1/billing/invoices/{invoiceID}/payments/{paymentID}/revoke-link:
+    post:
+      operationId: revokePaymentLink
+      parameters: [{$ref: '#/components/parameters/InvoiceID'}, {$ref: '#/components/parameters/PaymentID'}]
+      responses: {'200': {description: Link revoked; gateway order is not canceled}}
+  /v1/billing/invoices/{invoiceID}/payments/{paymentID}/simulate:
+    post:
+      operationId: simulatePayment
+      parameters: [{$ref: '#/components/parameters/InvoiceID'}, {$ref: '#/components/parameters/PaymentID'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [outcome], properties: {outcome: {enum: [succeeded, failed, canceled]}}}}}}
+      responses: {'200': {description: Simulation only; no money moves}, '400': {$ref: '#/components/responses/Error'}}
+  /v1/billing/invoices/{invoiceID}/receipts/{receiptID}:
+    get:
+      operationId: getPaymentReceipt
+      parameters: [{$ref: '#/components/parameters/InvoiceID'}, {name: receiptID, in: path, required: true, schema: {type: string}}, {name: format, in: query, schema: {enum: [json, html], default: json}}]
+      responses: {'200': {description: Payment receipt; not a tax invoice or bank settlement statement}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/payments/webhooks/{provider}:
+    post:
+      operationId: receiveVerifiedPaymentNotification
+      security: []
+      parameters: [{name: provider, in: path, required: true, schema: {enum: [wechat, alipay, paypal, stripe]}}]
+      description: Provider-specific signature required on raw body; bounded at 256 KiB. Unverified input never marks an invoice paid.
+      responses: {'204': {description: Verified notification accepted or unsupported verified event ignored}, '200': {description: Alipay success text acknowledgement}, '400': {$ref: '#/components/responses/Error'}}
+  /v1/marketplace/listings:
+    get: {security: [], responses: {'200': {description: Published marketplace listings}}}
+    post: {responses: {'201': {description: Marketplace listing created}}}
+  /v1/marketplace/listings/{listingID}/install:
+    post:
+      parameters: [{name: listingID, in: path, required: true, schema: {type: string}}]
+      responses: {'201': {description: Listing installed}, '402': {$ref: '#/components/responses/Error'}}
+  /v1/marketplace/installations:
+    get: {responses: {'200': {description: Account marketplace installations}}}
+  /v1/marketplace/transactions:
+    get: {responses: {'200': {description: Buyer and seller transaction ledger}}}
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [listing_id, idempotency_key], properties: {listing_id: {type: string}, buyer_agent_id: {type: string}, seller_agent_id: {type: string}, task_id: {type: string}, quantity: {type: integer, minimum: 1, maximum: 1000}, idempotency_key: {type: string}}}}}}
+      responses: {'201': {description: Pending Agent-to-Agent transaction created}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/marketplace/transactions/{transactionID}/authorize:
+    post: {parameters: [{$ref: '#/components/parameters/TransactionID'}], responses: {'200': {description: Buyer authorized transaction}, '409': {$ref: '#/components/responses/Error'}}}
+  /v1/marketplace/transactions/{transactionID}/complete:
+    post: {parameters: [{$ref: '#/components/parameters/TransactionID'}], responses: {'200': {description: Seller completed transaction}, '409': {$ref: '#/components/responses/Error'}}}
+  /v1/marketplace/transactions/{transactionID}/cancel:
+    post: {parameters: [{$ref: '#/components/parameters/TransactionID'}], responses: {'200': {description: Pending transaction cancelled}, '409': {$ref: '#/components/responses/Error'}}}
+  /v1/sync/hello:
+    post: {responses: {'200': {description: Signed device capability negotiation}}}
+  /v1/sync/push:
+    post: {responses: {'200': {description: Per-event durable acknowledgements}}}
+  /v1/sync/pull:
+    post: {responses: {'200': {description: Cursor-ordered event batch and device keys}}}
+  /v1/sync/ack:
+    post: {responses: {'204': {description: Durable cursor acknowledged}}}
+  /v1/reconcile:
+    post: {responses: {'200': {description: Missing events, heads, conflicts, and reconciliation cursor}}}
+  /v1/mcp:
+    post: {description: MCP 2025-06-18 JSON-RPC endpoint, responses: {'200': {description: MCP response}}}
+  /v1/a2a:
+    post: {description: A2A JSON-RPC gateway, responses: {'200': {description: A2A task or message result}}}
+  /.well-known/agent-card.json:
+    get: {security: [], responses: {'200': {description: A2A Agent Card}}}
+  /agentcontinuity.v1.ContinuityService/GetTask:
+    post: {description: Connect JSON unary GetTask procedure, responses: {'200': {description: Connect response}}}
+  /agentcontinuity.v1.ContinuityService/ListTasks:
+    post: {description: Connect JSON unary ListTasks procedure, responses: {'200': {description: Connect response}}}
+  /agentcontinuity.v1.ContinuityService/AppendEvent:
+    post: {description: Connect JSON unary AppendEvent procedure, responses: {'200': {description: Connect response}}}
+  /agentcontinuity.v1.ContinuityService/GetContinuityPackage:
+    post: {description: Connect JSON unary continuity package procedure, responses: {'200': {description: Connect response}}}
+  /scim/v2/ServiceProviderConfig:
+    get: {security: [{scimBearer: []}], responses: {'200': {description: SCIM 2.0 capabilities}}}
+  /scim/v2/ResourceTypes:
+    get: {security: [{scimBearer: []}], responses: {'200': {description: User and Group resource types}}}
+  /scim/v2/Schemas:
+    get: {security: [{scimBearer: []}], responses: {'200': {description: SCIM core schemas}}}
+  /scim/v2/Users:
+    get: {security: [{scimBearer: []}], responses: {'200': {description: Provisioned users}}}
+    post: {security: [{scimBearer: []}], responses: {'201': {description: User provisioned into the configured organization}}}
+  /scim/v2/Users/{identityID}:
+    parameters: [{name: identityID, in: path, required: true, schema: {type: string}}]
+    get: {security: [{scimBearer: []}], responses: {'200': {description: SCIM User}}}
+    put: {security: [{scimBearer: []}], responses: {'200': {description: SCIM User replaced}}}
+    patch: {security: [{scimBearer: []}], responses: {'200': {description: SCIM User patched}}}
+    delete: {security: [{scimBearer: []}], responses: {'204': {description: User deprovisioned without deleting continuity history}}}
+  /scim/v2/Groups:
+    get: {security: [{scimBearer: []}], responses: {'200': {description: Provisioned groups mapped to Teams}}}
+    post: {security: [{scimBearer: []}], responses: {'201': {description: Group and Team created}}}
+  /scim/v2/Groups/{groupID}:
+    parameters: [{name: groupID, in: path, required: true, schema: {type: string}}]
+    get: {security: [{scimBearer: []}], responses: {'200': {description: SCIM Group}}}
+    put: {security: [{scimBearer: []}], responses: {'200': {description: SCIM Group replaced}}}
+    patch: {security: [{scimBearer: []}], responses: {'200': {description: SCIM Group patched}}}
+    delete: {security: [{scimBearer: []}], responses: {'204': {description: Empty Group and Team deleted}}}
+components:
+  securitySchemes:
+    portalSession: {type: apiKey, in: cookie, name: ac_portal_session, description: Same-origin browser session. Unsafe requests also require X-Portal-Request=1.}
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+    bootstrapToken: {type: apiKey, in: header, name: X-Bootstrap-Token}
+    oauthClient: {type: http, scheme: basic}
+    scimBearer: {type: http, scheme: bearer, bearerFormat: opaque}
+  parameters:
+    PortalRequest: {name: X-Portal-Request, in: header, required: true, schema: {type: string, enum: ['1']}}
+    TenantID: {name: tenantID, in: path, required: true, schema: {type: string}}
+    InvoiceID: {name: invoiceID, in: path, required: true, schema: {type: string}}
+    PaymentID: {name: paymentID, in: path, required: true, schema: {type: string}}
+    BillingIdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 128}, description: Persist and reuse the same key on retry; never generate a new key for an uncertain payment.}
+    TaskID: {name: taskID, in: path, required: true, schema: {type: string}}
+    DeviceID: {name: deviceID, in: path, required: true, schema: {type: string}}
+    ArtifactID: {name: artifactID, in: path, required: true, schema: {type: string}}
+    OrganizationID: {name: organizationID, in: path, required: true, schema: {type: string}}
+    BranchID: {name: branchID, in: path, required: true, schema: {type: string}}
+    TransactionID: {name: transactionID, in: path, required: true, schema: {type: string}}
+    AccountID: {name: accountID, in: path, required: true, schema: {type: string}}
+  responses:
+    Error: {description: Error envelope, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  schemas:
+    TenantInvoicePeriod:
+      type: object
+      required: [period_start,period_end]
+      properties:
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+    InvoiceRequest:
+      type: object
+      required: [billing_account_id, period_start, period_end]
+      additionalProperties: false
+      properties:
+        billing_account_id: {type: string}
+        period_start: {type: string, format: date-time, description: Inclusive}
+        period_end: {type: string, format: date-time, description: Exclusive; a past interval of at most 366 days}
+    BillingLine:
+      type: object
+      properties:
+        metric: {type: string}
+        description: {type: string}
+        unit: {type: string}
+        quantity: {type: integer, format: int64, minimum: 0}
+        records: {type: integer, format: int64, minimum: 0}
+        unit_size: {type: integer, format: int64, minimum: 1}
+        unit_price_minor: {type: integer, format: int64, minimum: 0}
+        amount_minor: {type: integer, format: int64, minimum: 0}
+    BillingInvoice:
+      type: object
+      required: [invoice_id, account_id, currency, amount_minor, status, test_mode, lines]
+      properties:
+        invoice_id: {type: string}
+        account_id: {type: string}
+        billing_account_id: {type: string}
+        organization_id: {type: string}
+        payer_organization_id: {type: string, description: Frozen liable tenant; defaults to service tenant for independent billing}
+        payment_mandate_id: {type: string}
+        issued_by: {type: string, description: Actual issuing account}
+        number: {type: string}
+        status: {enum: [open, paid, void, refunded, disputed]}
+        currency: {enum: [CNY, USD, EUR]}
+        amount_minor: {type: integer, format: int64, minimum: 0, maximum: 100000000}
+        test_mode: {type: boolean}
+        price_book: {type: string}
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        due_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        lines: {type: array, items: {$ref: '#/components/schemas/BillingLine'}}
+    BillingPayment:
+      type: object
+      properties:
+        payment_id: {type: string}
+        initiated_by: {type: string, description: Actual initiating account, independent of invoice owner key}
+        provider: {type: string}
+        environment: {enum: [simulation, sandbox, live]}
+        status: {enum: [creating, pending, approved, succeeded, failed, canceled, expired, review]}
+        amount_minor: {type: integer, format: int64}
+        currency: {type: string}
+        provider_order_id: {type: string}
+        provider_transaction_id: {type: string}
+        checkout_url: {type: string, format: uri}
+        qr_code: {type: string}
+        idempotency_key: {type: string}
+        expires_at: {type: string, format: date-time}
+        link_revoked: {type: boolean}
+        last_error: {type: string}
+    BillingDocument:
+      type: object
+      properties:
+        invoice: {$ref: '#/components/schemas/BillingInvoice'}
+        payments: {type: array, items: {$ref: '#/components/schemas/BillingPayment'}}
+        receipts: {type: array, items: {type: object, description: Server-confirmed payment receipt; not a tax invoice}}
+        events: {type: array, items: {type: object}}
+        payment_links: {type: object, additionalProperties: {type: string, format: uri}}
+        can_pay: {type: boolean, description: Effective current actor permission; false for read-only tenant admin and merchant evidence}
+        version: {type: integer, format: int64}
+    Account: {type: object, required: [account_id, name, created_at], properties: {account_id: {type: string}, name: {type: string}, created_at: {type: string, format: date-time}}}
+    Task: {$ref: './schemas/task-state-v1.schema.json#/$defs/task'}
+    Error: {type: object, properties: {error: {type: object, properties: {code: {type: string}, message: {type: string}}}}}

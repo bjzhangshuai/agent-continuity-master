@@ -1,0 +1,31 @@
+replicaCount: 2
+image:
+  pullPolicy: IfNotPresent
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+serviceMonitor:
+  enabled: true
+artifactStorage:
+  backend: s3
+  s3:
+    endpoint: https://s3.staging.example.invalid
+    bucket: agent-continuity-staging
+    region: us-east-1
+    autoCreate: false
+networkPolicy:
+  externalEgress:
+    - cidr: 0.0.0.0/0
+      except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+      ports: [443]
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/component: server

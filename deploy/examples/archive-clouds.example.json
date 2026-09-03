@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "default_target": "aws-v1",
+  "organization_targets": {},
+  "broker": {
+    "url": "tls://jetstream.example.internal:4222",
+    "stream": "CONTINUITY_ARCHIVE", "subject": "continuity.archive.jobs", "consumer": "archive-workers",
+    "replicas": 3, "max_bytes": 1073741824, "max_messages": 1000000,
+    "credentials_file": "/run/archive-broker/user.creds", "ca_file": "/run/archive-broker/ca.crt"
+  },
+  "concurrency": 4, "poll_seconds": 2, "timeout_seconds": 60, "max_attempts": 6,
+  "max_pending_jobs": 100000, "max_staging_bytes": 10737418240,
+  "targets": [
+    {"id":"aws-v1","provider":"aws","endpoint":"https://s3.us-east-1.amazonaws.com","bucket":"YOUR-PRIVATE-BUCKET","region":"us-east-1","prefix":"continuity","access_key_file":"/run/archive/aws-access-key","secret_key_file":"/run/archive/aws-secret-key"},
+    {"id":"oss-v1","provider":"alicloud","endpoint":"https://oss-cn-hangzhou.aliyuncs.com","bucket":"YOUR-PRIVATE-BUCKET","region":"cn-hangzhou","prefix":"continuity","access_key_file":"/run/archive/oss-access-key","secret_key_file":"/run/archive/oss-secret-key"},
+    {"id":"cos-v1","provider":"tencentcloud","endpoint":"https://YOUR-BUCKET-APPID.cos.ap-guangzhou.myqcloud.com","bucket":"YOUR-BUCKET-APPID","region":"ap-guangzhou","prefix":"continuity","access_key_file":"/run/archive/cos-secret-id","secret_key_file":"/run/archive/cos-secret-key"},
+    {"id":"azure-v1","provider":"azure","endpoint":"https://YOUR-ACCOUNT.blob.core.windows.net","bucket":"private-container","account_name":"YOUR-ACCOUNT","prefix":"continuity","secret_key_file":"/run/archive/azure-account-key"},
+    {"id":"selfhost-v1","provider":"s3","endpoint":"https://objects.example.internal","bucket":"continuity","region":"us-east-1","prefix":"continuity","path_style":true,"access_key_file":"/run/archive/selfhost-access-key","secret_key_file":"/run/archive/selfhost-secret-key"}
+  ]
+}

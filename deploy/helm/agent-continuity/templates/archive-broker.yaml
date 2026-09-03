@@ -1,0 +1,103 @@
+{{- if and .Values.archive.enabled .Values.archive.broker.install }}
+{{- $name := printf "%s-archive-broker" (include "agent-continuity.fullname" .) }}
+{{- if not .Values.archive.broker.existingSecret }}
+{{- $old := lookup "v1" "Secret" .Release.Namespace $name }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  annotations: {helm.sh/resource-policy: keep}
+type: Opaque
+data:
+  {{- if $old }}
+  token: {{ index $old.data "token" | quote }}
+  {{- else }}
+  token: {{ randAlphaNum 48 | b64enc | quote }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+data:
+  nats.conf: |
+    port: 4222
+    http_port: 8222
+    server_name: continuity-archive-dev
+    authorization { token: $NATS_AUTH_TOKEN }
+    max_payload: 4096
+    max_connections: 128
+    jetstream {
+      store_dir: /data/jetstream
+      max_memory_store: 8MB
+      max_file_store: 128MB
+      sync_interval: always
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+spec:
+  selector: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: archive-broker}
+  ports: [{name: nats, port: 4222, targetPort: 4222}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+spec:
+  replicas: 1
+  serviceName: {{ $name }}
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: archive-broker}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: archive-broker}
+      annotations:
+        checksum/config: {{ .Values.archive.broker | toJson | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: nats
+          image: {{ .Values.archive.broker.image }}
+          args: ["--config", "/etc/nats/nats.conf"]
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          env:
+            - {name: GOMAXPROCS, value: "2"}
+            - {name: GOMEMLIMIT, value: 96MiB}
+            - name: NATS_AUTH_TOKEN
+              valueFrom: {secretKeyRef: {name: {{ .Values.archive.broker.existingSecret | default $name }}, key: token}}
+          ports: [{name: nats, containerPort: 4222}, {name: monitor, containerPort: 8222}]
+          readinessProbe: {httpGet: {path: /healthz, port: monitor}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /healthz, port: monitor}, initialDelaySeconds: 10, periodSeconds: 10}
+          resources: {{- toYaml .Values.archive.broker.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/nats, readOnly: true}
+            - {name: data, mountPath: /data}
+      volumes:
+        - name: config
+          configMap: {name: {{ $name }}}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: {{ .Values.archive.broker.size }}}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: archive-broker}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: archive-worker}
+      ports: [{protocol: TCP, port: 4222}]
+{{- end }}

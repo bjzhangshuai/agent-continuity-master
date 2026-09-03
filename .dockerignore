@@ -1,0 +1,15 @@
+.git
+.data
+bin
+dist
+coverage.*
+*.local
+docs
+sdk/typescript/node_modules
+sdk/typescript/dist
+sdk/python/**/__pycache__
+sdk/swift/.build
+sdk/kotlin/.gradle
+sdk/kotlin/build
+sdk/dotnet/**/bin
+sdk/dotnet/**/obj

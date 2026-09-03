@@ -1,0 +1,27 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "agent-continuity.fullname" . }}
+  labels:
+    {{- include "agent-continuity.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: agent-continuity
+      rules:
+        - alert: AgentContinuityNoReadyPods
+          expr: kube_deployment_status_replicas_available{deployment="{{ include "agent-continuity.fullname" . }}"} < 1
+          for: 5m
+          labels: {severity: critical}
+          annotations: {summary: "Agent Continuity has no ready API Pod", runbook_url: "docs/runbook.md"}
+        - alert: AgentContinuityServerErrors
+          expr: rate(continuity_http_server_errors_total[5m]) > 0.1
+          for: 10m
+          labels: {severity: warning}
+          annotations: {summary: "Agent Continuity server errors are elevated", runbook_url: "docs/runbook.md"}
+        - alert: AgentContinuitySyncFailureRate
+          expr: rate(continuity_sync_failure_total[10m]) / clamp_min(rate(continuity_sync_failure_total[10m]) + rate(continuity_sync_success_total[10m]), 0.001) > 0.05
+          for: 10m
+          labels: {severity: warning}
+          annotations: {summary: "Agent Continuity sync failure rate exceeds five percent", runbook_url: "docs/runbook.md"}
+{{- end }}

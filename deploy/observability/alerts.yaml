@@ -1,0 +1,28 @@
+groups:
+  - name: agent-continuity
+    rules:
+      - alert: AgentContinuityTargetDown
+        expr: up{job="agent-continuity"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "Agent Continuity API is unavailable", runbook_url: "docs/runbook.md"}
+      - alert: AgentContinuityServerErrors
+        expr: rate(continuity_http_server_errors_total[5m]) > 0.1
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "HTTP server errors are elevated", runbook_url: "docs/runbook.md"}
+      - alert: AgentContinuitySyncFailureRate
+        expr: rate(continuity_sync_failure_total[10m]) / clamp_min(rate(continuity_sync_failure_total[10m]) + rate(continuity_sync_success_total[10m]), 0.001) > 0.05
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "More than 5% of sync operations are failing", runbook_url: "docs/runbook.md"}
+      - alert: AgentContinuityDuplicateSpike
+        expr: rate(continuity_event_duplicates_total[10m]) > 10
+        for: 15m
+        labels: {severity: warning}
+        annotations: {summary: "Event duplicate rate is unexpectedly high", runbook_url: "docs/runbook.md"}
+      - alert: AgentContinuityReconciliationSlow
+        expr: rate(continuity_reconciliation_duration_milliseconds_total[10m]) / clamp_min(rate(continuity_reconciliations_total[10m]), 0.001) > 5000
+        for: 15m
+        labels: {severity: warning}
+        annotations: {summary: "Average reconciliation duration exceeds five seconds", runbook_url: "docs/runbook.md"}

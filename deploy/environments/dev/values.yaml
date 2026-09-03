@@ -1,0 +1,33 @@
+replicaCount: 1
+archive:
+  enabled: true
+  broker: {install: true}
+  config:
+    default_target: local-demo-v1
+    targets:
+      - {id: local-demo-v1, provider: filesystem, root: /data/archive-demo, prefix: continuity}
+    broker:
+      url: nats://agent-continuity-archive-broker:4222
+      token_file: /run/archive-broker/token
+      allow_insecure: true
+      replicas: 1
+    concurrency: 1
+    max_staging_bytes: 268435456
+payments:
+  demoEnabled: true
+  publicBaseURL: "http://127.0.0.1:18080"
+image:
+  repository: agent-continuity
+  tag: dev
+  pullPolicy: IfNotPresent
+resources:
+  requests: {cpu: 50m, memory: 64Mi}
+  limits: {cpu: 500m, memory: 256Mi}
+postgresql:
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+autoscaling: {enabled: false}
+podDisruptionBudget: {enabled: false}
+ingress: {enabled: false}
+serviceMonitor: {enabled: false}

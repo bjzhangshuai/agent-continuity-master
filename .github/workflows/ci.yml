@@ -1,0 +1,64 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version-file: go.mod, cache: true}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '24', cache: npm, cache-dependency-path: sdk/typescript/package-lock.json}
+      - name: Format
+        run: test -z "$(gofmt -l $(find . -name '*.go' -not -path './vendor/*'))"
+      - name: Vet
+        run: go vet ./...
+      - name: Unit and integration package tests
+        run: go test -coverprofile=coverage.out ./...
+      - name: Python SDK
+        run: cd sdk/python && PYTHONPATH=src python -m unittest discover -s tests -v
+      - name: TypeScript SDK
+        run: cd sdk/typescript && npm ci --ignore-scripts && npm test
+      - name: Race detector
+        run: go test -race ./...
+      - name: Reachable vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+      - name: Static security analysis
+        run: ./scripts/gosec-packages.sh
+      - name: Dependency license inventory
+        run: ./scripts/license-inventory.sh > dependency-licenses.csv
+      - name: Build
+        run: make build
+  deploy-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Helm lint and render
+        run: make helm-lint helm-template
+      - name: Compose E2E
+        run: make test-e2e
+      - name: Container build
+        run: docker build --tag agent-continuity:ci .
+      - name: SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: 'agent-continuity:ci'
+          format: spdx-json
+          output-file: sbom.spdx.json
+      - name: Container vulnerability scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: 'agent-continuity:ci'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+      - uses: actions/upload-artifact@v4
+        with: {name: sbom, path: sbom.spdx.json}

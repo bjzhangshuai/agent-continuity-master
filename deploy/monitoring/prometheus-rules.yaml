@@ -1,0 +1,45 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: agent-continuity
+  labels:
+    app.kubernetes.io/part-of: agent-continuity
+spec:
+  groups:
+    - name: agent-continuity.availability
+      rules:
+        - alert: AgentContinuityNoReadyPods
+          expr: kube_deployment_status_replicas_available{deployment="agent-continuity"} < 1
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: Agent Continuity has no ready API Pod
+            runbook_url: docs/runbook.md
+        - alert: AgentContinuityServerErrors
+          expr: rate(continuity_http_server_errors_total[5m]) > 0.1
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: Agent Continuity server errors are elevated
+            runbook_url: docs/runbook.md
+        - alert: AgentContinuityPodRestarting
+          expr: increase(kube_pod_container_status_restarts_total{container="server"}[15m]) > 2
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: Agent Continuity API is repeatedly restarting
+            runbook_url: docs/runbook.md
+        - alert: AgentContinuitySyncFailureRate
+          expr: rate(continuity_sync_failure_total[10m]) / clamp_min(rate(continuity_sync_failure_total[10m]) + rate(continuity_sync_success_total[10m]), 0.001) > 0.05
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: Agent Continuity sync failure rate exceeds five percent
+            runbook_url: docs/runbook.md
+        - alert: AgentContinuityReconciliationSlow
+          expr: rate(continuity_reconciliation_duration_milliseconds_total[10m]) / clamp_min(rate(continuity_reconciliations_total[10m]), 0.001) > 5000
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: Agent Continuity reconciliation is slow
+            runbook_url: docs/runbook.md

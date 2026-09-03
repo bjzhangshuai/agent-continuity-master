@@ -1,0 +1,19 @@
+{
+  "name": "agent-continuity",
+  "version": "0.1.0",
+  "description": "Continue and operate AI Agent tasks across devices through the Agent Continuity MCP server.",
+  "author": {
+    "name": "Agent Continuity"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agent Continuity",
+    "shortDescription": "Resume Agent tasks across devices.",
+    "longDescription": "List, inspect, resume, and append signed progress to Agent Continuity tasks using its authenticated local MCP bridge.",
+    "developerName": "Agent Continuity",
+    "category": "Productivity",
+    "capabilities": ["task-continuity", "mcp"],
+    "defaultPrompt": "Show my Agent Continuity tasks and help me resume the most relevant one."
+  },
+  "mcpServers": "./.mcp.json"
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "agent-continuity": {
+      "type": "local",
+      "command": ["agentcloud", "mcp", "stdio"],
+      "enabled": true,
+      "environment": {"AGENTCLOUD_API_URL": "http://127.0.0.1:18080"}
+    }
+  }
+}

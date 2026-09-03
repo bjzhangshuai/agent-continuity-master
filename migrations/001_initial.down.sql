@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS invitations;
+DROP TABLE IF EXISTS artifacts;
+DROP TABLE IF EXISTS conflicts;
+DROP TABLE IF EXISTS events;
+DROP TABLE IF EXISTS permissions;
+DROP TABLE IF EXISTS tasks;
+DROP TABLE IF EXISTS devices;
+DROP TABLE IF EXISTS accounts;
+DROP TABLE IF EXISTS schema_migrations;

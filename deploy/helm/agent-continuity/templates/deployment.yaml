@@ -1,0 +1,231 @@
+{{- $artifactBackend := .Values.artifactStorage.backend -}}
+{{- if not (has $artifactBackend (list "local" "s3")) -}}
+{{- fail "artifactStorage.backend must be local or s3" -}}
+{{- end -}}
+{{- if and (eq $artifactBackend "local") (ne .Values.artifactStorage.accessMode "ReadWriteMany") (or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled) -}}
+{{- fail "artifactStorage.backend=local requires replicaCount=1 and autoscaling.enabled=false; use s3 for multi-replica deployments" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agent-continuity.fullname" . }}
+  labels:
+    {{- include "agent-continuity.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "agent-continuity.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        continuity.agent-continuity.io/image-id: {{ .Values.image.buildID | quote }}
+      labels:
+        {{- include "agent-continuity.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/part-of: agent-continuity
+    spec:
+      serviceAccountName: {{ include "agent-continuity.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: migrate-and-wait-for-database
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - 'attempt=0; until /app/server migrate; do attempt=$((attempt+1)); [ "$attempt" -ge 30 ] && exit 1; sleep 2; done'
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - {name: CONTINUITY_STORE, value: postgres}
+            - name: CONTINUITY_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: database-url
+            - name: CONTINUITY_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: jwt-secret
+            - name: CONTINUITY_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: bootstrap-token
+            - name: CONTINUITY_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: master-key
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+      containers:
+        - name: server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "agent-continuity.fullname" . }}-config
+          env:
+            {{- if .Values.archive.existingSecret }}
+            - {name: CONTINUITY_ARCHIVE_CONFIG_FILE, value: /run/archive/config.json}
+            {{- end }}
+            - name: CONTINUITY_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: database-url
+            - name: CONTINUITY_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: jwt-secret
+            - name: CONTINUITY_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: bootstrap-token
+            - name: CONTINUITY_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: master-key
+            - name: CONTINUITY_OIDC_JWKS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: oidc-jwks
+                  optional: true
+            - name: CONTINUITY_SCIM_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: scim-bearer-token
+                  optional: true
+            {{- if .Values.payments.existingSecret }}
+            - name: CONTINUITY_PAYMENT_CONFIG_FILE
+              value: /run/payments/config.json
+            - name: CONTINUITY_BILLING_PRICE_BOOK_FILE
+              value: /run/payments/price-book.json
+            {{- end }}
+            {{- if .Values.treasury.existingSecret }}
+            - name: CONTINUITY_TREASURY_CONFIG_FILE
+              value: /run/treasury/config.json
+            {{- end }}
+            - name: CONTINUITY_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: s3-access-key
+                  optional: true
+            - name: CONTINUITY_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: s3-secret-key
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet: {path: /v1/health/live, port: http}
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            httpGet: {path: /v1/health/ready, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /v1/health/live, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 2"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            {{- if .Values.archive.existingSecret }}
+            - {name: archive-secrets, mountPath: /run/archive, readOnly: true}
+            {{- end }}
+            {{- if .Values.treasury.existingSecret }}
+            - name: treasury-secrets
+              mountPath: /run/treasury
+              readOnly: true
+            {{- end }}
+            {{- if .Values.payments.existingSecret }}
+            - name: payment-secrets
+              mountPath: /run/payments
+              readOnly: true
+            {{- end }}
+            - name: artifacts
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        {{- if .Values.archive.existingSecret }}
+        - name: archive-secrets
+          secret: {secretName: {{ .Values.archive.existingSecret }}, defaultMode: 0440}
+        {{- end }}
+        {{- if .Values.treasury.existingSecret }}
+        - name: treasury-secrets
+          secret:
+            secretName: {{ .Values.treasury.existingSecret }}
+            defaultMode: 0440
+        {{- end }}
+        {{- if .Values.payments.existingSecret }}
+        - name: payment-secrets
+          secret:
+            secretName: {{ .Values.payments.existingSecret }}
+            defaultMode: 0440
+        {{- end }}
+        - name: artifacts
+          {{- if eq .Values.artifactStorage.backend "local" }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.artifactStorage.existingClaim | default (printf "%s-artifacts" (include "agent-continuity.fullname" .)) }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.artifactStorage.size }}
+          {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- toYaml . | nindent 8 }}
+      {{- end }}

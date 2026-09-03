@@ -1,0 +1,71 @@
+syntax = "proto3";
+package agentcontinuity.v1;
+option go_package = "github.com/agent-continuity/agent-continuity-master/pkg/gen/agentcontinuity/v1";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+message HybridLogicalClock { int64 wall_time_ms = 1; uint32 counter = 2; string node = 3; }
+message Task {
+  string task_id = 1; string account_id = 2; string title = 3; string objective = 4; string status = 5;
+  string origin_device = 6; repeated string head_event_ids = 7; google.protobuf.Struct metadata = 8;
+  google.protobuf.Timestamp created_at = 9; google.protobuf.Timestamp updated_at = 10;
+  string organization_id = 11; string team_id = 12;
+}
+message TaskEvent {
+  string event_id = 1; string task_id = 2; string branch_id = 3; string account_id = 4; string participant_id = 5;
+  string agent_id = 6; string provider_id = 7; string device_id = 8; string session_ref = 9; repeated string parent_event_ids = 10;
+  HybridLogicalClock logical_time = 11; uint64 device_sequence = 12; uint64 server_sequence = 13; string event_type = 14;
+  string schema_version = 15; string content_type = 16; string content_digest = 17; bytes payload = 18;
+  repeated string artifact_refs = 19; google.protobuf.Timestamp created_at_client = 20; google.protobuf.Timestamp received_at_server = 21;
+  bytes signature = 22; string idempotency_key = 23; google.protobuf.Struct extensions = 24;
+}
+message ArtifactManifest {
+  string artifact_id = 1; string task_id = 2; string version_id = 3; string parent_version_id = 4; string content_type = 5;
+  string filename = 6; int64 size = 7; string content_hash = 8; string storage_reference = 9;
+  google.protobuf.Timestamp created_at = 10; google.protobuf.Struct metadata = 11;
+	string account_id = 12; string chunk_manifest_hash = 13; string producer_type = 14; string producer_id = 15;
+	string device_id = 16; google.protobuf.Struct encryption_metadata = 17;
+}
+message TaskBranch {
+	string task_id = 1; string branch_id = 2; string name = 3; string base_event_id = 4; repeated string head_event_ids = 5;
+	string status = 6; string created_by = 7; google.protobuf.Timestamp created_at = 8; string merged_into = 9; google.protobuf.Timestamp merged_at = 10;
+}
+message TaskParticipant {
+	string participant_id = 1; string task_id = 2; string account_id = 3; string agent_id = 4; string kind = 5;
+	string role = 6; string status = 7; google.protobuf.Timestamp joined_at = 8; google.protobuf.Timestamp left_at = 9;
+}
+message TaskAgentBinding {
+	string task_id = 1; string agent_id = 2; string participant_id = 3; string native_session_ref = 4; string resume_mode = 5;
+	repeated string capabilities = 6; google.protobuf.Struct metadata = 7; google.protobuf.Timestamp created_at = 8;
+}
+message Conflict {
+	string conflict_id = 1; string task_id = 2; string event_id = 3; string kind = 4; string strategy = 5;
+	google.protobuf.Struct details = 6; google.protobuf.Timestamp created_at = 7; bool resolved = 8;
+}
+message TaskSnapshot {
+	string snapshot_id = 1; string task_id = 2; string branch_id = 3; uint64 through_server_sequence = 4; int32 event_count = 5;
+	google.protobuf.Struct state = 6; string state_digest = 7; google.protobuf.Timestamp created_at = 8;
+}
+message ContinuityPackage {
+	string protocol_version = 1; string schema_version = 2; string target_agent = 3; Task task = 4;
+	repeated TaskEvent events = 5; repeated ArtifactManifest artifacts = 6; repeated string capabilities = 7;
+	repeated TaskBranch branches = 8; repeated TaskParticipant participants = 9; repeated TaskAgentBinding agent_bindings = 10;
+	repeated Conflict conflicts = 11; repeated TaskSnapshot snapshots = 12;
+}
+
+message ListTasksRequest { int32 limit = 1; }
+message ListTasksResponse { repeated Task tasks = 1; }
+message GetTaskRequest { string task_id = 1; }
+message GetTaskResponse { Task task = 1; }
+message AppendEventRequest { string task_id = 1; TaskEvent event = 2; }
+message AppendEventResponse { TaskEvent event = 1; bool duplicate = 2; }
+message GetContinuityPackageRequest { string task_id = 1; string target_agent = 2; }
+message GetContinuityPackageResponse { ContinuityPackage package = 1; }
+
+service ContinuityService {
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  rpc AppendEvent(AppendEventRequest) returns (AppendEventResponse);
+  rpc GetContinuityPackage(GetContinuityPackageRequest) returns (GetContinuityPackageResponse);
+}

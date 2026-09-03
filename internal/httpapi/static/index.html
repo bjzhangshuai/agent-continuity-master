@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Continuity 管理控制台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23111b18'/%3E%3Cpath d='M17 40 32 14l15 26-8-4-7 13-7-13z' fill='%2376e6ba'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+  <script src="/billing.js" defer></script>
+  <script src="/treasury.js" defer></script>
+  <script src="/portal.js" defer></script>
+  <script src="/archive.js" defer></script>
+</head>
+<body>
+  <header>
+    <div><span class="eyebrow">AGENT 运营控制平面</span><h1>Agent Continuity</h1><p data-zh="持久 · 可移植 · 因果一致 · 安全 · 协作" data-en="Persistent · Portable · Causal · Secure · Collaborative">持久 · 可移植 · 因果一致 · 安全 · 协作</p></div>
+    <div class="header-actions"><button id="language-toggle" class="language" type="button">EN</button><div class="connection"><span id="network-dot" class="dot"></span><span id="network-label" data-zh="在线" data-en="Online">在线</span></div></div>
+  </header>
+  <section class="card portal-login-card">
+    <form id="portal-login-form" class="portal-login-form">
+      <div><strong data-zh="账号登录" data-en="Account login">账号登录</strong><p class="muted" data-zh="一个账号加入多个租户；付款与平台管理权限分别授予。" data-en="One account, multiple tenants. Payment and platform permissions are separate.">一个账号加入多个租户；付款与平台管理权限分别授予。</p></div>
+      <label><span data-zh="登录账号" data-en="Username">登录账号</span><input id="portal-username" autocomplete="username" required></label>
+      <label><span data-zh="密码" data-en="Password">密码</span><input id="portal-password" type="password" autocomplete="current-password" required></label>
+      <button type="submit" data-zh="登录控制台" data-en="Sign in">登录控制台</button>
+    </form>
+    <div id="portal-session-bar" class="section-actions" hidden><strong id="portal-who"></strong><span class="badge" id="portal-session-kind"></span><button id="portal-logout" data-zh="退出 / 切换账号" data-en="Sign out / Switch account">退出 / 切换账号</button></div>
+    <p id="portal-login-error" role="status" class="payment-warning"></p>
+  </section>
+  <details id="portal-advanced-auth" class="card"><summary data-zh="高级连接：SDK / API 访问凭据" data-en="Advanced: SDK / API credentials">高级连接：SDK / API 访问凭据</summary><section class="auth">
+    <label for="token" data-zh="访问凭据" data-en="Bearer credential">访问凭据</label>
+    <input id="token" type="password" autocomplete="off" placeholder="JWT、API Key 或 OAuth Access Token" data-zh-placeholder="JWT、API Key 或 OAuth Access Token" data-en-placeholder="JWT, API key, or OAuth access token">
+    <button id="connect" data-zh="连接工作区" data-en="Connect workspace">连接工作区</button>
+    <span id="auth-status" class="muted" data-zh="凭据只保存在当前页面内存中。" data-en="The credential remains in this page only.">凭据只保存在当前页面内存中。</span>
+  </section></details>
+  <nav aria-label="控制台栏目">
+    <button class="tab" data-panel="archive-panel" data-zh="对象存储与队列" data-en="Storage & Queue">对象存储与队列</button>
+    <button class="tab active" data-panel="home-panel" data-zh="运营总览" data-en="Operations">运营总览</button>
+    <button class="tab" data-panel="tasks-panel" data-zh="任务" data-en="Tasks">任务</button>
+    <button class="tab" data-panel="detail-panel" data-zh="连续性" data-en="Continuity">连续性</button>
+    <button class="tab" data-panel="workspace-panel" data-zh="Agent 与工作区" data-en="Agents & Workspace">Agent 与工作区</button>
+    <button class="tab" data-panel="security-panel" data-zh="安全" data-en="Security">安全</button>
+    <button class="tab" data-panel="tenant-panel" data-zh="租户费用中心" data-en="Tenant billing">租户费用中心</button>
+    <button class="tab" data-panel="platform-panel" data-zh="平台分级管理" data-en="Platform administration">平台分级管理</button>
+    <button class="tab" data-panel="billing-panel" data-zh="个人用量与原账单" data-en="Personal usage & legacy bills">个人用量与原账单</button>
+    <button class="tab" data-panel="treasury-panel" data-zh="收款与提现" data-en="Collections & Payouts">收款与提现</button>
+    <button class="tab" data-panel="developer-panel" data-zh="开发者" data-en="Developer">开发者</button>
+    <button class="tab" data-panel="marketplace-panel" data-zh="市场" data-en="Marketplace">市场</button>
+  </nav>
+  <main>
+    <section id="archive-panel" class="panel"><div class="section-title"><div><span class="eyebrow">DURABLE CONTENT PIPELINE</span><h2 data-zh="对象存储与归档队列" data-en="Object storage & archival queue">对象存储与归档队列</h2></div><button id="archive-refresh" data-zh="刷新状态" data-en="Refresh">刷新状态</button></div><div id="archive-content"></div></section>
+    <section id="tenant-panel" class="panel"><div class="section-title"><div><span class="eyebrow">TENANT FINANCE</span><h2 data-zh="租户费用中心" data-en="Tenant billing center">租户费用中心</h2><p class="muted" data-zh="先确认租户与角色，再查看账单、发起支付和下载回执。集团代付必须双方授权。" data-en="Select your tenant and role before viewing bills, paying, or downloading receipts. Group billing needs mutual consent.">先确认租户与角色，再查看账单、发起支付和下载回执。集团代付必须双方授权。</p></div><button id="portal-refresh" data-zh="刷新租户状态" data-en="Refresh tenants">刷新租户状态</button></div><div id="portal-tenant-selector" class="card section-actions"></div><div id="portal-tenant-content"></div><div id="portal-invoice" class="card" hidden></div></section>
+    <section id="platform-panel" class="panel"><div class="section-title"><div><span class="eyebrow">SCOPED ADMINISTRATION</span><h2 data-zh="平台分级管理" data-en="Scoped platform administration">平台分级管理</h2><p class="muted" data-zh="超级管理员 → 总部管理 → 区域 / 业务线管理 → 运营、客服、财务、审计。后台授权不会自动成为租户成员。" data-en="Super admin → HQ → regional / business administration → operations, support, finance, audit. Platform grants do not make users tenant members.">超级管理员 → 总部管理 → 区域 / 业务线管理 → 运营、客服、财务、审计。后台授权不会自动成为租户成员。</p></div></div><div id="portal-platform-content"></div></section>
+    <section id="home-panel" class="panel active">
+      <div class="section-title"><div><span class="eyebrow">OPERATING PICTURE</span><h2 data-zh="运营总览" data-en="Operations overview">运营总览</h2><p class="muted" data-zh="从业务场景、任务风险、Agent 接力、设备和连续性指标实时汇总。" data-en="Live rollup across scenarios, task risk, Agent handoffs, devices, and continuity metrics.">从业务场景、任务风险、Agent 接力、设备和连续性指标实时汇总。</p></div><div class="section-actions"><span id="home-scale-badge" class="badge" data-zh="连接后显示数据规模" data-en="Connect to show scale">连接后显示数据规模</span><button id="refresh-home" data-zh="刷新" data-en="Refresh">刷新</button></div></div>
+      <div id="home-stats" class="stats"><div class="card muted" data-zh="连接后加载运营指标。" data-en="Connect to load operational metrics.">连接后加载运营指标。</div></div>
+      <div class="columns three operations">
+        <section class="card"><span class="eyebrow">WORKLOAD</span><h3 data-zh="任务健康分布" data-en="Task health distribution">任务健康分布</h3><p class="muted" data-zh="快速识别健康、需关注、阻塞和已完成任务。" data-en="Separate healthy, attention, blocked, and completed work.">快速识别健康、需关注、阻塞和已完成任务。</p><div id="operations-health" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section>
+        <section class="card"><span class="eyebrow">AGENT FLEET</span><h3 data-zh="Agent 实例分布" data-en="Agent instance mix">Agent 实例分布</h3><p class="muted" data-zh="按供应商查看当前可接力的执行能力。" data-en="Available execution capacity by provider.">按供应商查看当前可接力的执行能力。</p><div id="operations-agents" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section>
+        <section class="card"><span class="eyebrow">CONTINUITY</span><h3 data-zh="连续性与可信度" data-en="Continuity & trust">连续性与可信度</h3><p class="muted" data-zh="衡量跨 Agent 恢复、签名设备和因果任务覆盖。" data-en="Cross-Agent resume, signing devices, and causal coverage.">衡量跨 Agent 恢复、签名设备和因果任务覆盖。</p><div id="operations-trust" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section>
+      </div>
+      <div class="columns operations-focus">
+        <section class="card"><div class="card-heading"><div><span class="eyebrow">ACTION REQUIRED</span><h3 data-zh="优先处理任务" data-en="Priority queue">优先处理任务</h3></div><span class="badge" data-zh="按风险与 SLA 排序" data-en="Risk & SLA order">按风险与 SLA 排序</span></div><div id="attention-tasks" class="empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section>
+        <section class="card"><div class="card-heading"><div><span class="eyebrow">RECENT ACTIVITY</span><h3 data-zh="最近活跃任务" data-en="Recently active">最近活跃任务</h3></div><span class="badge" data-zh="可点击下钻" data-en="Click to inspect">可点击下钻</span></div><div id="recent-tasks" class="empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section>
+      </div>
+      <div class="columns">
+        <section class="card"><div class="card-heading"><h3 data-zh="业务场景覆盖" data-en="Scenario coverage">业务场景覆盖</h3><span class="badge">8 scenarios</span></div><div id="operations-scenarios" class="scenario-cloud empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section>
+        <section class="card"><div class="card-heading"><h3 data-zh="通知与运营信号" data-en="Notifications & signals">通知与运营信号</h3><span class="badge" data-zh="实时" data-en="Live">实时</span></div><div id="home-notifications" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section>
+      </div>
+    </section>
+
+    <section id="tasks-panel" class="panel">
+      <div class="section-title"><div><span class="eyebrow">LAZY INDEX</span><h2 data-zh="连续性任务" data-en="Continuity tasks">连续性任务</h2><p class="muted" data-zh="按场景、风险、Agent 和优先级快速定位，选择后按需加载完整事件与产物。" data-en="Filter by scenario, risk, Agent, and priority; events and Artifacts load on selection.">按场景、风险、Agent 和优先级快速定位，选择后按需加载完整事件与产物。</p></div><button id="refresh-tasks" data-zh="刷新" data-en="Refresh">刷新</button></div>
+      <section class="card task-toolbar">
+        <input id="task-search" type="search" autocomplete="off" placeholder="搜索任务、场景或负责人" data-zh-placeholder="搜索任务、场景或负责人" data-en-placeholder="Search task, scenario, or owner" aria-label="搜索任务">
+        <select id="task-health-filter" aria-label="健康状态"><option value="" data-zh="全部健康状态" data-en="All health states">全部健康状态</option><option value="healthy" data-zh="健康" data-en="Healthy">健康</option><option value="attention" data-zh="需关注" data-en="Attention">需关注</option><option value="blocked" data-zh="受阻" data-en="Blocked">受阻</option><option value="completed" data-zh="已完成" data-en="Completed">已完成</option></select>
+        <select id="task-provider-filter" aria-label="Agent 供应商"><option value="" data-zh="全部 Agent" data-en="All Agents">全部 Agent</option><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="codebuddy">CodeBuddy</option><option value="gemini">Gemini CLI</option><option value="cursor">Cursor</option><option value="opencode">OpenCode</option></select>
+        <select id="task-priority-filter" aria-label="优先级"><option value="" data-zh="全部优先级" data-en="All priorities">全部优先级</option><option value="critical" data-zh="紧急" data-en="Critical">紧急</option><option value="high" data-zh="高" data-en="High">高</option><option value="medium" data-zh="中" data-en="Medium">中</option><option value="low" data-zh="低" data-en="Low">低</option></select>
+        <button id="clear-task-filters" type="button" data-zh="清空筛选" data-en="Clear filters">清空筛选</button>
+      </section>
+      <div id="task-results-summary" class="results-summary muted" data-zh="连接后加载任务。" data-en="Connect to load tasks.">连接后加载任务。</div>
+      <div id="tasks" class="grid empty" data-zh="连接后加载任务。" data-en="Connect to load tasks.">连接后加载任务。</div>
+      <button id="load-more-tasks" class="load-more" type="button" hidden data-zh="加载更多任务" data-en="Load more tasks">加载更多任务</button>
+    </section>
+
+    <section id="detail-panel" class="panel">
+      <div class="section-title"><div><span class="eyebrow">SELECTED TASK</span><h2 id="detail-title" data-zh="尚未选择任务" data-en="No task selected">尚未选择任务</h2></div><span id="sync-badge" class="badge" data-zh="未加载" data-en="Not loaded">未加载</span></div>
+      <div id="task-summary" class="card muted" data-zh="请从任务列表选择一个任务。" data-en="Choose a task from the task list.">请从任务列表选择一个任务。</div>
+      <div class="columns">
+        <section class="card"><h3 data-zh="事件时间线" data-en="Timeline">事件时间线</h3><div id="events" class="feed empty" data-zh="暂无事件。" data-en="No events loaded.">暂无事件。</div></section>
+        <section class="card"><h3 data-zh="对话记录" data-en="Conversation">对话记录</h3><div id="conversation" class="feed empty" data-zh="暂无对话事件。" data-en="No conversation events loaded.">暂无对话事件。</div></section>
+      </div>
+      <div class="columns"><section class="card"><h3 data-zh="产物" data-en="Artifacts">产物</h3><div id="artifacts" class="feed empty" data-zh="暂无产物。" data-en="No Artifacts loaded.">暂无产物。</div></section><section class="card"><h3 data-zh="产物版本" data-en="Artifact versions">产物版本</h3><div id="artifact-versions" class="feed empty" data-zh="暂无版本。" data-en="No versions loaded.">暂无版本。</div></section></div>
+      <div class="columns">
+        <section class="card"><h3 data-zh="冲突与参与者" data-en="Conflicts & participants">冲突与参与者</h3><div id="collaboration" class="feed empty" data-zh="暂无协作状态。" data-en="No collaboration state loaded.">暂无协作状态。</div></section>
+        <section class="card"><h3 data-zh="恢复预览" data-en="Resume preview">恢复预览</h3><p class="muted" data-zh="切换 Agent 前检查将被注入的连续性包。" data-en="Inspect what will be rehydrated before switching agents.">切换 Agent 前检查将被注入的连续性包。</p><select id="target-agent" aria-label="目标 Agent"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="codebuddy">CodeBuddy</option><option value="gemini">Gemini CLI</option><option value="cursor">Cursor Agent</option><option value="opencode">OpenCode</option></select><button id="preview-resume" data-zh="预览连续性包" data-en="Preview package">预览连续性包</button><pre id="resume-preview"></pre></section>
+      </div>
+      <div class="columns">
+        <section class="card"><h3 data-zh="任务 DAG / 分支" data-en="Task DAG / branches">任务 DAG / 分支</h3><div id="branches" class="dag empty" data-zh="暂无分支。" data-en="No branches loaded.">暂无分支。</div></section>
+        <section class="card"><h3 data-zh="Agent 绑定" data-en="Agent bindings">Agent 绑定</h3><div id="task-agents" class="feed empty" data-zh="暂无 Agent 绑定。" data-en="No Agent bindings loaded.">暂无 Agent 绑定。</div></section>
+      </div>
+      <div class="columns">
+        <section class="card"><h3 data-zh="任务权限" data-en="Task permissions">任务权限</h3><div class="row"><input id="permission-account" placeholder="账户 ID" data-zh-placeholder="账户 ID" data-en-placeholder="Account ID" aria-label="权限账户"><select id="permission-level"><option value="read">Read</option><option value="write">Write</option><option value="admin">Admin</option></select><button id="grant-permission" data-zh="授权 / 更新" data-en="Grant / update">授权 / 更新</button></div><div id="task-permissions" class="feed empty" data-zh="需要管理员权限。" data-en="Administrator access is required.">需要管理员权限。</div></section>
+        <section class="card"><h3 data-zh="元数据与审计" data-en="Metadata & audit">元数据与审计</h3><pre id="task-metadata"></pre><div id="task-audit" class="feed empty" data-zh="暂无任务审计。" data-en="No task audit loaded.">暂无任务审计。</div></section>
+      </div>
+      <section class="card"><h3 data-zh="按范围共享" data-en="Share with scoped access">按范围共享</h3><div class="row"><select id="share-permission"><option value="read">Read</option><option value="write">Write</option></select><input id="share-ttl" type="number" min="60" max="86400" value="900" aria-label="邀请有效秒数"><button id="create-share" data-zh="创建一次性邀请" data-en="Create one-time invitation">创建一次性邀请</button></div><pre id="share-result"></pre></section>
+    </section>
+
+    <section id="workspace-panel" class="panel">
+      <div class="section-title"><div><span class="eyebrow">AGENT FLEET</span><h2 data-zh="Agent 与工作区" data-en="Agents & workspace">Agent 与工作区</h2><p class="muted" data-zh="管理接入能力、Agent 身份、设备和组织。" data-en="Manage integrations, Agent identities, devices, and organizations.">管理接入能力、Agent 身份、设备和组织。</p></div><button id="refresh-workspace" data-zh="刷新" data-en="Refresh">刷新</button></div>
+      <section class="card catalog-card"><div class="card-heading"><div><h3 data-zh="内置 Agent 接入矩阵" data-en="Built-in Agent integrations">内置 Agent 接入矩阵</h3><p class="muted" data-zh="所有适配器都支持显式日志发现、增量捕获、产物校验和跨 Agent 恢复。" data-en="Every adapter supports explicit-log discovery, incremental capture, Artifact verification, and cross-Agent recovery.">所有适配器都支持显式日志发现、增量捕获、产物校验和跨 Agent 恢复。</p></div><span class="badge">6 providers</span></div><div id="agent-catalog" class="agent-catalog"></div></section>
+      <div class="columns three">
+        <section class="card"><h3 data-zh="已注册 Agent" data-en="Registered Agents">已注册 Agent</h3><div id="agents" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section>
+        <section class="card"><div class="card-heading"><h3 data-zh="设备名称与平台" data-en="Device names & platforms">设备名称与平台</h3><span id="device-count-badge" class="badge" data-zh="尚未连接" data-en="Not connected">尚未连接</span></div><div id="devices" class="feed empty" data-zh="连接工作区后显示设备名称。" data-en="Connect the workspace to show device names.">连接工作区后显示设备名称。</div></section>
+        <section class="card"><h3 data-zh="组织与团队" data-en="Organizations & teams">组织与团队</h3><div id="organizations" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section>
+      </div>
+      <section class="card"><h3 data-zh="协作者与联系人" data-en="Collaborators & contacts">协作者与联系人</h3><p class="muted" data-zh="任务参与者构成受限联系人图；全局通讯录不会自动授予任务权限。" data-en="Task participants form the scoped contact graph; a global address book never grants task access.">任务参与者构成受限联系人图；全局通讯录不会自动授予任务权限。</p><div id="workspace-collaborations" class="feed empty" data-zh="选择任务后查看参与者。" data-en="Select a task to inspect participants.">选择任务后查看参与者。</div></section>
+    </section>
+
+    <section id="security-panel" class="panel">
+      <div class="section-title"><div><span class="eyebrow">TRUST CONTROL</span><h2 data-zh="安全与审计" data-en="Security & audit">安全与审计</h2></div><button id="refresh-security" data-zh="刷新" data-en="Refresh">刷新</button></div>
+      <div class="columns"><section class="card"><h3 data-zh="API 凭据" data-en="API credentials">API 凭据</h3><div id="security-api-keys" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section><section class="card"><h3 data-zh="审计轨迹" data-en="Audit trail">审计轨迹</h3><div id="audit-events" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section></div>
+      <section class="card"><h3 data-zh="安全基线" data-en="Security posture">安全基线</h3><div class="feed"><div class="feed-item" data-zh="设备事件：Ed25519 签名" data-en="Device events: Ed25519 signed">设备事件：Ed25519 签名</div><div class="feed-item" data-zh="载荷与产物：可选客户端 AES-256-GCM 加密" data-en="Payloads and Artifacts: optional client-side AES-256-GCM">载荷与产物：可选客户端 AES-256-GCM 加密</div><div class="feed-item" data-zh="任务密钥：按设备分发 X25519 信封并支持轮换" data-en="Task keys: per-device X25519 envelopes with rotation">任务密钥：按设备分发 X25519 信封并支持轮换</div></div></section>
+    </section>
+
+    <section id="billing-panel" class="panel">
+      <div class="section-title"><div><span class="eyebrow">METERING</span><h2 data-zh="用量与计费" data-en="Usage & billing">用量与计费</h2><p class="muted" data-zh="查看幂等用量账本、套餐额度、计费周期和逐条资源计量。" data-en="Inspect the idempotent usage ledger, plan limits, billing periods, and resource-level meters.">查看幂等用量账本、套餐额度、计费周期和逐条资源计量。</p></div><div class="section-actions"><select id="billing-range" aria-label="计量时间范围"><option value="1" data-zh="最近 24 小时" data-en="Last 24 hours">最近 24 小时</option><option value="7" data-zh="最近 7 天" data-en="Last 7 days">最近 7 天</option><option value="30" selected data-zh="最近 30 天" data-en="Last 30 days">最近 30 天</option><option value="0" data-zh="全部时间" data-en="All time">全部时间</option></select><span id="billing-load-status" class="badge" data-zh="等待连接" data-en="Waiting for connection">等待连接</span><button id="refresh-billing" data-zh="刷新" data-en="Refresh">刷新</button></div></div>
+      <div id="billing-summary" class="stats billing-stats"><div class="card muted" data-zh="连接后加载计量摘要。" data-en="Connect to load metering summary.">连接后加载计量摘要。</div></div>
+      <div class="columns"><section class="card"><h3 data-zh="计费账户与套餐额度" data-en="Billing account & plan limits">计费账户与套餐额度</h3><div id="billing-accounts" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section><section class="card"><h3 data-zh="用量聚合" data-en="Usage rollup">用量聚合</h3><div id="billing-usage" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section></div>
+      <section class="card finance-section"><div class="card-heading"><h3 data-zh="支付渠道" data-en="Payment providers">支付渠道</h3><span id="payment-mode" class="badge">等待连接</span></div><div id="payment-providers" class="provider-grid"></div><p class="muted" data-zh="商户密钥只存放在服务端 Secret；支付宝与 Alipay 为同一渠道。未配置渠道不可收款。" data-en="Merchant secrets remain server-side. Alipay is one provider. Unconfigured providers cannot collect money.">商户密钥只存放在服务端 Secret；支付宝与 Alipay 为同一渠道。未配置渠道不可收款。</p></section>
+      <div id="finance-summary" class="finance-summary"></div>
+      <div class="columns finance-section"><section class="card"><h3 data-zh="消费预览与出账" data-en="Consumption & invoicing">消费预览与出账</h3><p class="muted" data-zh="按完整时间窗口汇总全部用量，不受明细列表 1,000 条上限影响。金额与单价由服务端计算并冻结。" data-en="All usage in the window is billed, independent of the 1,000-row display limit. Prices and amounts are calculated and frozen server-side.">按完整时间窗口汇总全部用量，不受明细列表 1,000 条上限影响。金额与单价由服务端计算并冻结。</p><form id="invoice-form" class="invoice-form"><label><span data-zh="计费账户" data-en="Billing account">计费账户</span><select id="invoice-account" required></select></label><label><span data-zh="起始时间（包含）" data-en="From (inclusive)">起始时间（包含）</span><input id="invoice-from" type="datetime-local" required></label><label><span data-zh="结束时间（不包含）" data-en="To (exclusive)">结束时间（不包含）</span><input id="invoice-to" type="datetime-local" required></label><div class="section-actions"><button id="invoice-preview" type="submit" data-zh="预览消费费用" data-en="Preview charges">预览消费费用</button><button id="invoice-issue" type="button" disabled data-zh="确认生成账单" data-en="Issue invoice">确认生成账单</button></div></form><div id="invoice-quote" class="feed empty" data-zh="选择时间范围，先预览再出账。" data-en="Preview the selected period before issuing.">选择时间范围，先预览再出账。</div></section><section class="card"><div class="card-heading"><h3 data-zh="账单列表" data-en="Invoices">账单列表</h3><select id="invoice-status" aria-label="账单状态"><option value="" data-zh="全部状态" data-en="All statuses">全部状态</option><option value="open" data-zh="待支付" data-en="Open">待支付</option><option value="paid" data-zh="已支付" data-en="Paid">已支付</option><option value="void" data-zh="已作废" data-en="Void">已作废</option><option value="disputed" data-zh="需核查" data-en="Needs review">需核查</option></select></div><div id="invoice-list" class="feed empty" data-zh="连接后加载账单。" data-en="Connect to load invoices.">连接后加载账单。</div></section></div>
+      <section id="invoice-detail" class="card finance-section" hidden></section>
+      <section class="card billing-detail"><div class="card-heading"><div><h3 data-zh="逐条计量明细" data-en="Meter-level details">逐条计量明细</h3><p class="muted" data-zh="此处展示最近记录；正式出账使用完整窗口。每条记录包含指标、数量、资源、幂等键与时间。" data-en="Recent records are displayed here; invoicing uses the full window. Each record includes its meter, quantity, resource, idempotency key and time.">此处展示最近记录；正式出账使用完整窗口。每条记录包含指标、数量、资源、幂等键与时间。</p></div><span id="billing-detail-count" class="badge" data-zh="尚未加载" data-en="Not loaded">尚未加载</span></div><div id="billing-usage-detail" class="usage-detail empty" data-zh="连接工作区后显示计量明细。" data-en="Connect the workspace to show meter details.">连接工作区后显示计量明细。</div></section>
+      <section class="card billing-boundary"><h3 data-zh="收款与结算边界" data-en="Collection & settlement boundary">收款与结算边界</h3><p data-zh="已接入微信 Native、支付宝当面付、PayPal、Stripe 的协议适配。真实收款须配置商户凭据、HTTPS 回调域名、批准后的价格表及 live 开关。本地默认只运行独立模拟渠道。" data-en="Adapters cover WeChat Native, Alipay QR, PayPal and Stripe. Live collection requires merchant credentials, HTTPS callbacks, an approved price book and explicit live enablement. Local development uses a separate simulator.">已接入微信 Native、支付宝当面付、PayPal、Stripe 的协议适配。真实收款须配置商户凭据、HTTPS 回调域名、批准后的价格表及 live 开关。本地默认只运行独立模拟渠道。</p><p class="muted" data-zh="平台账单不等于税务发票；支付回执不等于银行结算单。「收款与提现」提供结算、本人账户与提现的完整模拟及可选 Stripe 银行转出适配。退款审批、渠道日账单文件对账及税票尚未实现。" data-en="An invoice here is not a tax invoice; a payment receipt is not a bank settlement. Collections & Payouts adds full simulation and optional Stripe bank payouts. Refund approval, daily settlement-file reconciliation and tax invoicing are not implemented.">平台账单不等于税务发票；支付回执不等于银行结算单。「收款与提现」提供结算、本人账户与提现的完整模拟及可选 Stripe 银行转出适配。退款审批、渠道日账单文件对账及税票尚未实现。</p></section>
+    </section>
+
+    <section id="treasury-panel" class="panel">
+      <div class="section-title"><div><span class="eyebrow">MONEY JOURNEY</span><h2 data-zh="收款与提现" data-en="Collections & payouts">收款与提现</h2><p class="muted" data-zh="从付款回执到渠道结算、自己的收款账户、提现审批与到账记录。" data-en="From payment receipts to settlement, your own destinations, approval and payout records.">从付款回执到渠道结算、自己的收款账户、提现审批与到账记录。</p></div><div class="section-actions"><button id="treasury-billing" data-zh="发起支付 / 查看账单" data-en="Start payment / invoices">发起支付 / 查看账单</button><button id="treasury-refresh" data-zh="刷新资金状态" data-en="Refresh funds">刷新资金状态</button></div></div>
+      <div id="treasury-content"><p class="card muted" data-zh="连接工作区后加载；仅收款运营方可访问。" data-en="Connect as the configured merchant operator to view treasury.">连接工作区后加载；仅收款运营方可访问。</p></div>
+    </section>
+
+    <section id="developer-panel" class="panel">
+      <div class="section-title"><div><span class="eyebrow">DEVELOPER PLATFORM</span><h2 data-zh="客户端、Webhook 与协议" data-en="Clients, hooks & protocols">客户端、Webhook 与协议</h2></div><button id="refresh-developer" data-zh="刷新" data-en="Refresh">刷新</button></div>
+      <div class="protocol-strip"><span>MCP 2025-06-18</span><span>A2A 0.3.0</span><span>REST / OpenAPI</span><span>Connect</span><span>WebSocket</span></div>
+      <div class="columns three"><section class="card"><h3>API Keys</h3><div id="api-keys" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section><section class="card"><h3>OAuth Clients</h3><div id="oauth-clients" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section><section class="card"><h3>Webhooks</h3><div id="webhooks" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section></div>
+      <section class="card"><h3 data-zh="计量用量" data-en="Metered usage">计量用量</h3><div id="usage" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section>
+    </section>
+
+    <section id="marketplace-panel" class="panel">
+      <div class="section-title"><div><span class="eyebrow">AGENT NETWORK</span><h2 data-zh="Agent 市场" data-en="Agent marketplace">Agent 市场</h2></div><button id="refresh-marketplace" data-zh="刷新" data-en="Refresh">刷新</button></div>
+      <div class="columns three"><section class="card"><h3 data-zh="上架项目" data-en="Listings">上架项目</h3><div id="marketplace-listings" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section><section class="card"><h3 data-zh="已安装" data-en="Installations">已安装</h3><div id="marketplace-installations" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section><section class="card"><h3 data-zh="交易" data-en="Transactions">交易</h3><div id="marketplace-transactions" class="feed empty" data-zh="尚未加载。" data-en="Not loaded.">尚未加载。</div></section></div>
+    </section>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

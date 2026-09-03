@@ -1,0 +1,23 @@
+# Production example only. Do not apply to the unhealthy local Argo controller.
+# Ensure the controller's version allowlist supports this pinned NATS version.
+# Consume the resulting TLS address/auth Secret via CONTINUITY_ARCHIVE_CONFIG_FILE.
+# Use a separate platform Stream, not the Argo-managed default.* subjects.
+apiVersion: argoproj.io/v1alpha1
+kind: EventBus
+metadata:
+  name: continuity
+  namespace: agent-continuity
+spec:
+  jetstream:
+    version: "2.12.15"
+    replicas: 3
+    persistence:
+      accessMode: ReadWriteOnce
+      volumeSize: 10Gi
+    settings: |
+      max_file_store: 8GB
+      sync_interval: always
+    containerTemplate:
+      resources:
+        requests: {cpu: 250m, memory: 256Mi}
+        limits: {cpu: "2", memory: 1Gi}

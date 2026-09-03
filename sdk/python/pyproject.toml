@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-continuity"
+version = "0.1.0"
+description = "Python SDK for the Agent Continuity protocol"
+requires-python = ">=3.10"
+dependencies = ["cryptography>=42"]
+license = {text = "Apache-2.0"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

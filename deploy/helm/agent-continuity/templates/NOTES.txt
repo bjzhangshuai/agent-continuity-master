@@ -1,0 +1,7 @@
+Agent Continuity is installed in namespace {{ .Release.Namespace }}.
+
+Health check:
+  kubectl --context rancher-desktop -n {{ .Release.Namespace }} port-forward svc/{{ include "agent-continuity.fullname" . }} 18080:8080
+  curl http://127.0.0.1:18080/v1/health/ready
+
+The chart keeps PostgreSQL and Artifact PVCs on uninstall. Remove them only after a verified backup.

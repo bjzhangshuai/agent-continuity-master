@@ -1,0 +1,18 @@
+{{- if and (eq .Values.artifactStorage.backend "local") (not .Values.artifactStorage.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agent-continuity.fullname" . }}-artifacts
+  labels:
+    {{- include "agent-continuity.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [{{ .Values.artifactStorage.accessMode | quote }}]
+  {{- if .Values.artifactStorage.storageClassName }}
+  storageClassName: {{ .Values.artifactStorage.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.artifactStorage.size }}
+{{- end }}

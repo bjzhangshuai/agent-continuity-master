@@ -1,0 +1,43 @@
+{{- if .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "agent-continuity.fullname" . }}-backup
+  labels:
+    {{- include "agent-continuity.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+            - name: pg-dump
+              image: postgres:16-alpine
+              command: ["/bin/sh", "-ec"]
+              args:
+                - 'stamp=$(date -u +%Y%m%dT%H%M%SZ); pg_dump --dbname="$CONTINUITY_DATABASE_URL" --format=custom --no-owner --no-privileges --file="/backup/postgres-$stamp.dump"; find /backup -type f -name "postgres-*.dump" -mtime +{{ .Values.backup.retentionDays }} -delete'
+              env:
+                - name: CONTINUITY_DATABASE_URL
+                  valueFrom: {secretKeyRef: {name: {{ .Values.existingSecret }}, key: database-url}}
+              resources:
+                requests: {cpu: 20m, memory: 32Mi}
+                limits: {cpu: 250m, memory: 128Mi}
+              volumeMounts:
+                - {name: backup, mountPath: /backup}
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: {{ required "backup.existingPVC is required when backup.enabled=true" .Values.backup.existingPVC }}
+{{- end }}
