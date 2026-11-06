@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/agent-continuity/agent-continuity-master/internal/metering"
+	"github.com/agent-continuity/agent-continuity-master/internal/operations"
 	"github.com/agent-continuity/agent-continuity-master/internal/storage"
 	"github.com/agent-continuity/agent-continuity-master/internal/tenancy"
 	"github.com/agent-continuity/agent-continuity-master/pkg/protocol"
 )
 
 type Store struct {
+	operations               map[string]operations.Record
 	tenancyControl           tenancy.Control
 	portalLogins             map[string]tenancy.Login
 	portalSessions           map[string]tenancy.Session

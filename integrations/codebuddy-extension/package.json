@@ -3,7 +3,7 @@
   "displayName": "Agent Continuity for CodeBuddy",
   "description": "Opt-in conversation continuity, MinIO archive status, billing and local simulated checkout.",
   "publisher": "agent-continuity",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "license": "Apache-2.0",
   "repository": {"type": "git", "url": "git+ssh://git@github.com/bjzhangshuai/agent-continuity-master.git"},
   "engines": {"vscode": "^1.70.0"},

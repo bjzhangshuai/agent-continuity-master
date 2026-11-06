@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"github.com/agent-continuity/agent-continuity-master/internal/auth"
 	"github.com/agent-continuity/agent-continuity-master/internal/billing"
+	"github.com/agent-continuity/agent-continuity-master/internal/commerce"
 	"github.com/agent-continuity/agent-continuity-master/internal/payments"
 	"github.com/agent-continuity/agent-continuity-master/internal/tenancy"
 	"github.com/agent-continuity/agent-continuity-master/internal/treasury"
@@ -72,7 +73,7 @@ func TestPortalHierarchyGrantsAndNoImplicitTenantAccess(t *testing.T) {
 	portalWant(t, f, "POST", "/v1/portal/tenants", st, map[string]string{"name": "too-deep", "slug": "too-deep", "parent_id": parent}, 400)
 }
 func TestPortalTenantBillingConsentAndRevocation(t *testing.T) {
-	f := newFixtureWithOptions(t, WithPayments(payments.NewRegistry(payments.Demo{}), billing.DemoPriceBook(), "http://127.0.0.1:18080"))
+	f := newFixtureWithOptions(t, WithPayments(payments.NewRegistry(payments.Demo{}), billing.DemoPriceBook(), "http://127.0.0.1:18080"), WithCommerce(commerce.DemoGateway{}, true))
 	groupOwner, gt := f.account("group-owner")
 	childOwner, ct := f.account("child-owner")
 	payer, pt := f.account("payer")
@@ -91,6 +92,26 @@ func TestPortalTenantBillingConsentAndRevocation(t *testing.T) {
 	portalWant(t, f, "POST", "/v1/portal/mandates/"+mandate.ID+"/accept", ct, nil, 403)
 	portalWant(t, f, "POST", "/v1/portal/mandates/"+mandate.ID+"/accept", gt, nil, 200)
 	portalWant(t, f, "POST", "/v1/portal/mandates/"+mandate.ID+"/accept", gt, nil, 409)
+	// A purchase preserves the group liability and both authorized finance roles.
+	tenantBilling, err := f.api.store.GetTenantBillingAccount(context.Background(), child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing := decode[protocol.MarketplaceListing](t, portalWant(t, f, "POST", "/v1/marketplace/listings", gt, map[string]any{"kind": "capability", "name": "Group purchase", "version": "1.0.0", "description": "Group mandate test", "manifest": map[string]string{"protocol": "a2a"}, "price_minor": 1000, "currency": "CNY", "commission_basis_points": 1000, "status": "published"}, 201))
+	tx := decode[protocol.MarketplaceTransaction](t, portalWant(t, f, "POST", "/v1/marketplace/transactions", ct, map[string]any{"listing_id": listing.ID, "quantity": 1, "idempotency_key": "group-purchase-transaction"}, 201))
+	portalWant(t, f, "POST", "/v1/marketplace/transactions/"+tx.ID+"/authorize", ct, nil, 200)
+	checkout := decode[struct {
+		Bill      protocol.BillingDocument `json:"bill"`
+		PaymentID string                   `json:"payment_id"`
+		Link      string                   `json:"payment_link"`
+	}](t, portalWant(t, f, "POST", "/v1/marketplace/transactions/"+tx.ID+"/checkout", ct, map[string]string{"billing_account_id": tenantBilling.ID, "provider": "demo"}, 201))
+	if checkout.PaymentID == "" || checkout.Link == "" || checkout.Bill.Invoice.PayerOrganizationID != group.ID || checkout.Bill.Invoice.PaymentMandateID != mandate.ID {
+		t.Fatal("purchase lost group liability or authorized checkout")
+	}
+	purchasePath := "/v1/billing/invoices/" + checkout.Bill.Invoice.ID
+	portalWant(t, f, "POST", purchasePath+"/payments", at, map[string]string{"provider": "demo"}, 404)
+	portalWant(t, f, "POST", purchasePath+"/payments/"+checkout.PaymentID+"/simulate", pt, map[string]string{"outcome": "succeeded"}, 200)
+
 	now := time.Now().UTC()
 	for n, account := range []string{childOwner.ID, viewer.ID} {
 		err := f.api.store.RecordUsage(context.Background(), protocol.UsageRecord{ID: []string{"u1", "u2"}[n], AccountID: account, OrganizationID: child.ID, Metric: "api.mutation", Unit: "operation", Quantity: 10, RecordedAt: now.Add(-time.Minute)})
@@ -129,13 +150,25 @@ func TestPortalTenantBillingConsentAndRevocation(t *testing.T) {
 			t.Fatal("non-idempotent payment confirmation")
 		}
 	}
+	fiscal := decode[commerce.Fiscal](t, portalWant(t, f, "POST", path+"/fiscal", pt, map[string]string{"buyer_name": "Group payer", "tax_id": "91310000TEST"}, 202))
+	fiscalPath := "/v1/commerce/fiscal/" + fiscal.Effect.ID
+	portalWant(t, f, "POST", fiscalPath+"/reconcile", at, nil, 404)
+	portalWant(t, f, "POST", fiscalPath+"/reconcile", pt, nil, 200)
+	portalWant(t, f, "GET", fiscalPath+"/document", at, nil, 200)
+	portalWant(t, f, "GET", fiscalPath, vt, nil, 404)
+	rows := portalWant(t, f, "GET", path+"/fiscal", pt, nil, 200)
+	if !bytes.Contains(rows, []byte(fiscal.Effect.ID)) {
+		t.Fatal("delegated finance fiscal list missing")
+	}
 	portalWant(t, f, "DELETE", "/v1/organizations/"+group.ID+"/members/"+payer.ID, gt, nil, 204)
+	portalWant(t, f, "GET", fiscalPath+"/document", pt, nil, 404)
+	portalWant(t, f, "POST", fiscalPath+"/reconcile", pt, nil, 404)
 	portalWant(t, f, "GET", path, pt, nil, 404)
 	portalWant(t, f, "GET", "/v1/treasury", ct, nil, 503) // no operator configured in this fixture
 	b, _ := f.api.store.GetTenantBillingAccount(context.Background(), child.ID)
 	b.PayerOrganizationID = group.ID
 	b.PaymentMandateID = mandate.ID
-	_, err := f.api.billing.Issue(context.Background(), b, now.Add(-2*time.Hour), now.Add(-time.Hour), "stale-consent-key")
+	_, err = f.api.billing.Issue(context.Background(), b, now.Add(-2*time.Hour), now.Add(-time.Hour), "stale-consent-key")
 	if err != billing.ErrConflict {
 		t.Fatal("revoked mandate accepted at commit", err)
 	}

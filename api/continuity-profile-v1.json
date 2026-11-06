@@ -3,7 +3,9 @@
   "revision": "2026-11-07",
   "status": "project-contract",
   "industry_standard": false,
-  "protocol_versions": ["1.0"],
+  "protocol_versions": [
+    "1.0"
+  ],
   "schema_version": "1.0",
   "discovery": "/.well-known/agent-continuity.json",
   "openapi": "/v1/protocol/openapi.yaml",
@@ -13,14 +15,57 @@
     "audit_event": "/v1/protocol/schemas/audit-event-v1.schema.json"
   },
   "transports": {
-    "rest": {"endpoint": "/v1", "status": "supported"},
-    "sync": {"endpoint": "/v1/sync/hello", "status": "supported", "capability_negotiation": true},
-    "mcp": {"endpoint": "/v1/mcp", "version": "2025-06-18", "status": "tool-subset", "full_conformance": false},
-    "a2a": {"endpoint": "/v1/a2a", "status": "legacy-custom-gateway", "full_conformance": false, "industry_version": null}
+    "rest": {
+      "endpoint": "/v1",
+      "status": "supported"
+    },
+    "sync": {
+      "endpoint": "/v1/sync/hello",
+      "status": "supported",
+      "capability_negotiation": true
+    },
+    "mcp": {
+      "endpoint": "/v1/mcp",
+      "versions": [
+        "2026-07-28",
+        "2025-11-25",
+        "2025-06-18",
+        "2025-03-26"
+      ],
+      "status": "tools-profile",
+      "full_conformance": false,
+      "capabilities": [
+        "server/discover",
+        "initialize",
+        "ping",
+        "tools/list",
+        "tools/call"
+      ],
+      "transport": "stateless Streamable HTTP; JSON responses; stdio bridge"
+    },
+    "a2a": {
+      "endpoint": "/a2a/v1",
+      "industry_version": "1.0",
+      "status": "JSONRPC execution profile",
+      "full_conformance": false,
+      "verified_client": "a2aproject/a2a-go/v2@v2.6.0",
+      "methods": [
+        "SendMessage",
+        "GetTask",
+        "ListTasks",
+        "CancelTask"
+      ],
+      "optional_streaming": false,
+      "optional_push_notifications": false,
+      "legacy_endpoint": "/v1/a2a"
+    }
   },
   "semantics": {
     "delivery": "at-least-once",
-    "deduplication": ["event_id", "task_id+device_id+idempotency_key"],
+    "deduplication": [
+      "event_id",
+      "task_id+device_id+idempotency_key"
+    ],
     "ordering": "causal DAG; server_sequence is a pull cursor, not causal order",
     "signing": "AC-EVENT-1 Ed25519 portable signing; legacy Go encoding accepted",
     "resume": "portable rehydrate; native resume requires adapter detection",
@@ -28,9 +73,29 @@
     "audit": "signed events preserve device provenance; HTTP audit/webhook enqueue are currently best-effort",
     "distributed_transactions": "PostgreSQL transactional outbox + JetStream at-least-once + idempotent worker; no cross-cloud XA",
     "currency": "integer minor units; CNY/USD/EUR; provider fees and model token bills are separate",
-    "extensions": "preserve unknown namespaced extensions; negotiate capability intersection before use"
+    "extensions": "preserve unknown namespaced extensions; negotiate capability intersection before use",
+    "execution": "durable approved DAG, lease fencing, bounded retries, step meter atomic with completion; external effects require provider idempotency",
+    "key_management": "server secret envelope encryption with AWS/Alibaba/Tencent/Azure KMS; tenant AAD; rotating version registry; cloud account validation still required"
   },
-  "billing_api": {"invoices": "/v1/billing/invoices", "usage": "/v1/usage", "receipt_type": "non-tax", "marketplace_settlement": "not-connected"},
-  "sdk_languages": ["go", "python", "typescript", "swift", "kotlin", "dotnet"],
-  "limits": {"automatic_closed_app_installation": false, "native_runtime_migration": false, "model_execution_orchestration": false}
+  "billing_api": {
+    "invoices": "/v1/billing/invoices",
+    "usage": "/v1/usage",
+    "receipt_type": "non-tax",
+    "marketplace_settlement": "/v1/commerce/settlements",
+    "fiscal_documents": "/v1/commerce/fiscal",
+    "fiscal_provider": "replaceable gateway; simulation is not a legal tax invoice"
+  },
+  "sdk_languages": [
+    "go",
+    "python",
+    "typescript",
+    "swift",
+    "kotlin",
+    "dotnet"
+  ],
+  "limits": {
+    "automatic_closed_app_installation": false,
+    "native_runtime_migration": false,
+    "model_execution_orchestration": true
+  }
 }

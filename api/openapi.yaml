@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Agent Continuity API
-  version: 0.1.0
+  version: 0.3.0
   description: Versioned control, sync, collaboration, developer-platform, MCP, A2A, and Connect API.
 servers: [{url: 'http://127.0.0.1:8080'}]
 security: [{bearerAuth: []}, {portalSession: []}]
@@ -553,8 +553,117 @@ paths:
     post: {responses: {'204': {description: Durable cursor acknowledged}}}
   /v1/reconcile:
     post: {responses: {'200': {description: Missing events, heads, conflicts, and reconciliation cursor}}}
+  /a2a/v1:
+    post:
+      description: 'A2A 1.0 JSON-RPC: SendMessage/GetTask/ListTasks/CancelTask. Text-only execution; default blocking or configuration.returnImmediately. Bearer account isolation. No streaming/push/extended card advertised. A2A-Version header, if provided, must be 1.0.'
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [jsonrpc, id, method], properties: {jsonrpc: {const: '2.0'}, id: {}, method: {type: string}, params: {type: object}}}}}}
+      responses: {'200': {description: A2A result or JSON-RPC error}, '400': {description: Malformed or invalid RPC}, '401': {$ref: '#/components/responses/Error'}}
+  /v1/orchestration/agents:
+    get:
+      responses: {'200': {description: Administrator-configured executor names}}
+  /v1/orchestration/runs:
+    post:
+      parameters: [{$ref: '#/components/parameters/BillingIdempotencyKey'}]
+      description: 'Create durable, topologically sorted DAG. Task binding requires task owner and write access. Budgets bound attempts in execution units; not vendor token accounting. Maximum 32 steps, 5 attempts each. Same idempotency key with different request returns 409.'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExecutionPlan'}}}}
+      responses: {'201': {description: Created or idempotently retrieved Run}, '400': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+    get:
+      parameters: [{name: after, in: query, schema: {type: string}, description: Last operation ID from previous page}]
+      responses: {'200': {description: Up to 100 owner-scoped operation records with Run in data}}
+  /v1/orchestration/runs/{runID}:
+    parameters: [{name: runID, in: path, required: true, schema: {type: string}}]
+    get:
+      responses: {'200': {description: Plan, step status/output, attempts, spent budget and event history}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/orchestration/runs/{runID}/{action}:
+    parameters: [{name: runID, in: path, required: true, schema: {type: string}}, {name: action, in: path, required: true, schema: {enum: [approve, cancel]}}]
+    post:
+      description: Owner-only state transition; canceled work cannot commit stale results. Remote side effects require agent compensation.
+      responses: {'200': {description: Run state}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/marketplace/transactions/{transactionID}/checkout:
+    parameters: [{$ref: '#/components/parameters/TransactionID'}]
+    post:
+      parameters: [{$ref: '#/components/parameters/BillingIdempotencyKey'}]
+      description: Authorized buyer creates immutable purchase invoice and existing provider payment; tenant billing role and active payer mandate are enforced.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [billing_account_id, provider], properties: {billing_account_id: {type: string}, provider: {type: string}}}}}}
+      responses: {'201': {description: 'bill, payment_id and payment_link; requires_payer=true with empty payment fields when buyer must ask delegated payer finance to pay'}, '403': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/marketplace/transactions/{transactionID}/settlement:
+    parameters: [{$ref: '#/components/parameters/TransactionID'}]
+    post:
+      description: Buyer or seller creates immutable split intent from verified successful receipt. Bill version guarded in same database transaction.
+      responses: {'201': {description: Settlement with seller/platform allocations}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/commerce/settlements:
+    get:
+      responses: {'200': {description: Buyer or seller visible settlements with current refund projection}}
+  /v1/commerce/settlements/{transactionID}:
+    parameters: [{$ref: '#/components/parameters/TransactionID'}]
+    get:
+      responses: {'200': {description: Gross, commission, collected, reserved, available, refunded, debt and provider effects}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/commerce/settlements/{transactionID}/reconcile:
+    parameters: [{$ref: '#/components/parameters/TransactionID'}]
+    post:
+      description: Retry original provider effect IDs; uncertain outcomes remain reserved. Refunds generate reversals and block excess withdrawal.
+      responses: {'200': {description: Reconciled settlement}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/commerce/settlements/{transactionID}/withdraw:
+    parameters: [{$ref: '#/components/parameters/TransactionID'}]
+    post:
+      parameters: [{$ref: '#/components/parameters/BillingIdempotencyKey'}]
+      description: Seller-only atomic reservation against verified recipient and current bill version. No raw bank credentials accepted.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [amount_minor, destination], properties: {amount_minor: {type: integer, minimum: 1}, destination: {type: string, description: Verified provider-issued recipient token}}}}}}
+      responses: {'202': {description: Reserved withdrawal; query/reconcile for final provider state}, '400': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/commerce/recipients:
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [provider_account_token, kind], properties: {provider_account_token: {type: string}, kind: {enum: [bank, wechat, alipay, paypal]}}}}}}
+      responses: {'201': {description: Owner-bound provider verification result}}
+  /v1/commerce/recipients/{recipientID}/reconcile:
+    parameters: [{name: recipientID, in: path, required: true, schema: {type: string}}]
+    post:
+      responses: {'200': {description: Recipient verification state}}
+  /v1/billing/invoices/{invoiceID}/fiscal:
+    parameters: [{$ref: '#/components/parameters/InvoiceID'}]
+    post:
+      description: Paid invoice only; owner or authorized tenant finance. Idempotent per invoice; different buyer details conflict. Demo is not a legally valid tax invoice.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [buyer_name, tax_id], properties: {buyer_name: {type: string, maxLength: 200}, tax_id: {type: string, minLength: 4, maxLength: 40, pattern: '^[A-Z0-9-]+$'}}}}}}
+      responses: {'202': {description: Durable blue invoice request}, '409': {$ref: '#/components/responses/Error'}}
+    get:
+      description: Invoice-authorized access for tenant finance; includes issued or pending refund credit documents.
+      responses: {'200': {description: Fiscal operation records for this invoice}}
+  /v1/commerce/fiscal:
+    get:
+      parameters: [{name: after, in: query, schema: {type: string}}]
+      responses: {'200': {description: Up to 100 owner-scoped fiscal operations}}
+  /v1/commerce/fiscal/{fiscalID}:
+    parameters: [{name: fiscalID, in: path, required: true, schema: {type: string}}]
+    get:
+      responses: {'200': {description: Invoice-authorized fiscal request and provider result}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/commerce/fiscal/{fiscalID}/reconcile:
+    parameters: [{name: fiscalID, in: path, required: true, schema: {type: string}}]
+    post:
+      description: Recover original provider request; successful refunds produce idempotent linked credit requests. Requires invoice write authority.
+      responses: {'200': {description: Fiscal state and durable refund credit intents}}
+  /v1/commerce/fiscal/{fiscalID}/document:
+    parameters: [{name: fiscalID, in: path, required: true, schema: {type: string}}]
+    get:
+      responses: {'200': {description: Issued provider document; simulation explicitly watermarked, content: {application/octet-stream: {schema: {type: string, format: binary}}}}, '409': {description: Document not yet issued}}
+  /v1/security/kms:
+    get:
+      description: Requires secrets:read. Returns current caller key version and simulation flag, never cloud credentials.
+      responses: {'200': {description: KMS mode}}
+  /v1/security/secrets/{name}:
+    parameters: [{name: name, in: path, required: true, schema: {type: string, pattern: '^[a-zA-Z0-9_-]{1,80}$'}}]
+    put:
+      description: Account-isolated server secret; secrets:write required. Version 0 creates, later writes require expected version. Envelope encrypted at rest; max 64 KiB.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [value, expected_version], properties: {value: {type: string}, expected_version: {type: integer, minimum: 0}}}}}}
+      responses: {'200': {description: New version and non-sensitive encryption metadata}, '409': {$ref: '#/components/responses/Error'}}
+    get:
+      description: Requires secrets:read; returns plaintext only to account principal with no-store caching.
+      responses: {'200': {description: Secret value and version}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/security/secrets/{name}/rewrap:
+    parameters: [{name: name, in: path, required: true, schema: {type: string, pattern: '^[a-zA-Z0-9_-]{1,80}$'}}]
+    post:
+      description: Requires secrets:write; decrypt old version and re-encrypt with current tenant key using CAS. Old key must remain readable until migration completes.
+      responses: {'200': {description: Rotated envelope version}, '409': {$ref: '#/components/responses/Error'}}
   /v1/mcp:
-    post: {description: MCP 2025-06-18 JSON-RPC endpoint, responses: {'200': {description: MCP response}}}
+    post: {description: "MCP 2026-07-28 discovery and tools; protocol/client metadata and mirrored MCP-Protocol-Version/Mcp-Method/Mcp-Name headers required. Legacy initialize 2025-11-25/06-18/03-26 retained; notifications return 202.", responses: {'200': {description: MCP response}}}
   /.well-known/agent-continuity.json:
     get: {security: [], responses: {'200': {description: Versioned project protocol profile and explicit compatibility boundaries}}}
   /v1/protocol/openapi.yaml:
@@ -623,6 +732,27 @@ components:
   responses:
     Error: {description: Error envelope, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   schemas:
+    ExecutionPlan:
+      type: object
+      required: [steps, budget]
+      properties:
+        task_id: {type: string}
+        budget: {type: integer, minimum: 0, maximum: 100000000}
+        require_approval: {type: boolean, default: false}
+        steps:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items:
+            type: object
+            required: [id, agent, input, cost_limit]
+            properties:
+              id: {type: string, minLength: 1, maxLength: 100}
+              agent: {type: string}
+              input: {type: string, maxLength: 32768}
+              needs: {type: array, uniqueItems: true, items: {type: string}}
+              max_attempts: {type: integer, minimum: 1, maximum: 5, default: 3}
+              cost_limit: {type: integer, minimum: 0}
     TenantInvoicePeriod:
       type: object
       required: [period_start,period_end]

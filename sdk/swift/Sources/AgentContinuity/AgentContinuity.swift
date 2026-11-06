@@ -294,6 +294,11 @@ public actor AgentContinuityClient {
     public func syncAck(deviceID: String, tasks: [AckCursor]) async throws { let _: EmptyResponse = try await request("POST", "/v1/sync/ack", body: SyncAck(deviceID: deviceID, tasks: tasks), allowEmpty: true) }
 
     private func escaped(_ value: String) -> String { value.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"))! }
+    public func createRun(plan: JSONValue, key: String) async throws -> JSONValue { try await request("POST", "/v1/orchestration/runs", body: plan, key: key) }
+    public func getRun(_ id: String) async throws -> JSONValue { try await request("GET", "/v1/orchestration/runs/\(escaped(id))") }
+    public func controlRun(_ id: String, action: String) async throws -> JSONValue { try await request("POST", "/v1/orchestration/runs/\(escaped(id))/\(escaped(action))") }
+    public func issueFiscal(_ id: String, buyer: JSONValue) async throws -> JSONValue { try await request("POST", "/v1/billing/invoices/\(escaped(id))/fiscal", body: buyer) }
+    public func getSettlement(_ id: String) async throws -> JSONValue { try await request("GET", "/v1/commerce/settlements/\(escaped(id))") }
     public func listInvoices() async throws -> JSONValue { try await request("GET", "/v1/billing/invoices?limit=200") }
     public func getInvoice(_ id: String) async throws -> JSONValue { try await request("GET", "/v1/billing/invoices/\(escaped(id))") }
     public func quoteInvoice(period: JSONValue) async throws -> JSONValue { try await request("POST", "/v1/billing/quote", body: period) }

@@ -41,7 +41,7 @@ def validate_production_values(v):
             raise ValueError('Replace placeholder ingress host')
         if not any(host in entry.get('hosts', []) and entry.get('secretName') for entry in ingress['tls']):
             raise ValueError('Ingress requires a TLS Secret covering its host')
-    if v['payments']['demoEnabled'] or v['treasury']['demoEnabled']:
+    if v['payments']['demoEnabled'] or v['treasury']['demoEnabled'] or v['workflows']['demoEnabled'] or v['kms']['config'].get('simulation', False):
         raise ValueError('Production must disable demo payments and treasury')
 
 def main():
@@ -132,6 +132,21 @@ def main():
             if not v['networkPolicy']['brokerPeers']: raise ValueError('Production requires explicit brokerPeers')
             if not config.get('targets') or any(t.get('provider') == 'filesystem' for t in config['targets']): raise ValueError('Production requires real object storage targets')
             if any('.invalid' in t.get('endpoint', '') for t in config['targets']): raise ValueError('Replace placeholder cloud endpoints')
+    for component, root in [('workflows','/run/workflows/'),('kms','/run/kms/')]:
+        name=v[component]['existingSecret']
+        if not name:continue
+        cfg=json.loads(base64.b64decode(secret(name,['config.json'])['config.json']))
+        if args.production and (cfg.get('simulation') or cfg.get('demo_enabled')):
+            raise ValueError(f'Production {component} cannot use simulation')
+        objects=[cfg,*cfg.get('agents',{}).values(),*cfg.get('keys',[])]
+        for obj in objects:
+            for key,path in obj.items():
+                if key.endswith('_file') and path:
+                    if not isinstance(path,str) or not path.startswith(root) or '/' in path[len(root):]:
+                        raise ValueError(f'{component} credential must map to its mounted Secret')
+                    secret(name,[path[len(root):]])
+        if component=='kms' and (not cfg.get('current') or not cfg.get('keys')):
+            raise ValueError('KMS Secret requires current key and key registry')
     if args.production:
         if v['image']['tag'] in ('dev', 'latest', ''): raise ValueError('Production requires an immutable release image tag')
         db = urlparse(base64.b64decode(core['database-url']).decode())

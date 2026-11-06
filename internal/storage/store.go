@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/agent-continuity/agent-continuity-master/internal/billing"
+	"github.com/agent-continuity/agent-continuity-master/internal/operations"
 	"github.com/agent-continuity/agent-continuity-master/internal/tenancy"
 	"github.com/agent-continuity/agent-continuity-master/internal/treasury"
 	"time"
@@ -24,6 +25,7 @@ var (
 )
 
 type Store interface {
+	operations.Repository
 	tenancy.Repository
 	billing.Repository
 	treasury.Repository

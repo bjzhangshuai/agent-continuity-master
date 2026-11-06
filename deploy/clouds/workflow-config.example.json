@@ -1,0 +1,10 @@
+{
+  "demo_enabled":false,
+  "allow_live":true,
+  "agents":{
+    "default":{"url":"https://REPLACE_AGENT_HOST/a2a/v1","token_file":"/run/workflows/default-agent.token"},
+    "reviewer":{"url":"https://REPLACE_REVIEWER_HOST/a2a/v1","token_file":"/run/workflows/reviewer.token"}
+  },
+  "commerce_url":"https://REPLACE_ACQUIRER_TAX_GATEWAY_HOST",
+  "commerce_token_file":"/run/workflows/commerce.token"
+}

@@ -98,10 +98,11 @@ type CaptureResult struct {
 }
 
 type ResumeRequest struct {
-	Task      protocol.Task
-	Events    []protocol.Event
-	Artifacts []protocol.Artifact
-	Native    *NativeSession
+	ExecutionReports []protocol.ExecutionReport
+	Task             protocol.Task
+	Events           []protocol.Event
+	Artifacts        []protocol.Artifact
+	Native           *NativeSession
 }
 
 type ResumeResult struct {

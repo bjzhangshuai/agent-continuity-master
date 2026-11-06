@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/agent-continuity/agent-continuity-master/internal/billing"
+	"github.com/agent-continuity/agent-continuity-master/internal/operations"
 	"math"
 	"net/http"
 	"regexp"
@@ -691,7 +693,7 @@ func (s *Server) createWebhookEndpoint(w http.ResponseWriter, r *http.Request) {
 		writeInternal(w, err)
 		return
 	}
-	encryptedSecret, err := s.secretCipher.Encrypt([]byte(secret), id)
+	encryptedSecret, err := s.secretCipher.Encrypt([]byte(secret), claims.AccountID+":"+id)
 	if err != nil {
 		writeInternal(w, err)
 		return
@@ -1031,6 +1033,21 @@ func (s *Server) transitionMarketplaceTransaction(w http.ResponseWriter, r *http
 	if !ok {
 		return
 	}
+	if status == "completed" {
+		t, e := s.store.GetMarketplaceTransaction(r.Context(), r.PathValue("transactionID"))
+		if e != nil || t.SellerAccountID != claims.AccountID {
+			writeError(w, 409, "invalid_transaction_transition", "seller required")
+			return
+		}
+		if t.AmountMinor > 0 {
+			d, e := s.store.GetBill(r.Context(), t.BuyerAccountID, operations.ID("inv", t.BuyerAccountID, "marketplace:"+t.ID))
+			if e != nil || !billing.PurchasePaid(d, t.ID) {
+				writeError(w, 402, "payment_required", "verified marketplace payment required")
+				return
+			}
+		}
+	}
+
 	value, err := s.store.TransitionMarketplaceTransaction(r.Context(), r.PathValue("transactionID"), claims.AccountID, status, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, storage.ErrUnauthorized) {

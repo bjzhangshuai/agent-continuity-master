@@ -148,7 +148,7 @@ func (adapter Adapter) Capture(ctx context.Context, request adaptersdk.CaptureRe
 }
 
 func (Adapter) Resume(_ context.Context, request adaptersdk.ResumeRequest) (adaptersdk.ResumeResult, error) {
-	if request.Native != nil && request.Native.Provider == "codex" && request.Native.SessionRef != "" {
+	if len(request.ExecutionReports) == 0 && request.Native != nil && request.Native.Provider == "codex" && request.Native.SessionRef != "" {
 		if err := validateSessionRef(request.Native.SessionRef); err != nil {
 			return adaptersdk.ResumeResult{}, err
 		}
@@ -167,6 +167,7 @@ func (Adapter) Resume(_ context.Context, request adaptersdk.ResumeRequest) (adap
 		"protocol_version":   adaptersdk.ContractVersion,
 		"task":               request.Task,
 		"events":             request.Events,
+		"execution_reports":  request.ExecutionReports,
 		"artifact_manifests": request.Artifacts,
 	}
 	data, err := json.MarshalIndent(summary, "", "  ")

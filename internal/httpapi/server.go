@@ -25,8 +25,11 @@ import (
 	artifactstore "github.com/agent-continuity/agent-continuity-master/internal/artifact"
 	"github.com/agent-continuity/agent-continuity-master/internal/auth"
 	"github.com/agent-continuity/agent-continuity-master/internal/billing"
+	"github.com/agent-continuity/agent-continuity-master/internal/commerce"
 	"github.com/agent-continuity/agent-continuity-master/internal/identity"
+	"github.com/agent-continuity/agent-continuity-master/internal/kms"
 	"github.com/agent-continuity/agent-continuity-master/internal/observability"
+	"github.com/agent-continuity/agent-continuity-master/internal/orchestration"
 	"github.com/agent-continuity/agent-continuity-master/internal/payments"
 	"github.com/agent-continuity/agent-continuity-master/internal/secrets"
 	"github.com/agent-continuity/agent-continuity-master/internal/storage"
@@ -38,6 +41,9 @@ import (
 )
 
 type Server struct {
+	keyManager         *kms.Manager
+	orchestrator       *orchestration.Service
+	commerce           *commerce.Service
 	archive            *archive.Worker
 	platformAdmins     map[string]bool
 	billing            *billing.Service
@@ -105,6 +111,12 @@ func New(store storage.Store, artifacts *artifactstore.Service, tokens *auth.Man
 }
 
 func (s *Server) StartBackground(ctx context.Context) {
+	if s.orchestrator != nil {
+		go s.orchestrator.Run(ctx, s.logger)
+	}
+	if s.commerce != nil && s.commerce.Gateway != nil {
+		go s.commerce.Run(ctx, s.logger)
+	}
 	go s.billing.Run(ctx, s.logger)
 	dispatcher := webhookdispatcher.New(s.store, s.secretCipher, s.logger)
 	go dispatcher.Run(ctx)
@@ -112,6 +124,9 @@ func (s *Server) StartBackground(ctx context.Context) {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.registerWorkflowRoutes(mux)
+	s.registerVaultRoutes(mux)
+	mux.HandleFunc("POST /a2a/v1", s.standardA2A)
 	mux.HandleFunc("GET /v1/health/live", s.live)
 	mux.HandleFunc("GET /v1/health/ready", s.ready)
 	mux.HandleFunc("GET /metrics", s.metrics)
@@ -242,7 +257,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/marketplace/transactions/{transactionID}/authorize", s.authorizeMarketplaceTransaction)
 	mux.HandleFunc("POST /v1/marketplace/transactions/{transactionID}/complete", s.completeMarketplaceTransaction)
 	mux.HandleFunc("POST /v1/marketplace/transactions/{transactionID}/cancel", s.cancelMarketplaceTransaction)
-	mux.HandleFunc("GET /.well-known/agent-card.json", s.agentCard)
+	mux.HandleFunc("GET /.well-known/agent-card.json", s.standardAgentCard)
 	mux.HandleFunc("GET /.well-known/agent-continuity.json", s.protocolDiscovery)
 	mux.HandleFunc("GET /v1/protocol/schemas/{name}", s.protocolSchema)
 	mux.HandleFunc("GET /v1/protocol/openapi.yaml", s.protocolOpenAPI)
@@ -253,6 +268,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /agentcontinuity.v1.ContinuityService/AppendEvent", s.connectAppendEvent)
 	mux.HandleFunc("POST /agentcontinuity.v1.ContinuityService/GetContinuityPackage", s.connectGetContinuityPackage)
 	mux.HandleFunc("GET /app.js", s.staticAsset)
+	mux.HandleFunc("GET /workflows.js", s.staticAsset)
 	mux.HandleFunc("GET /archive.js", s.staticAsset)
 	mux.HandleFunc("GET /billing.js", s.staticAsset)
 	mux.HandleFunc("GET /refunds.js", s.staticAsset)

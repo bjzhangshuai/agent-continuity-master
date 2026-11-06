@@ -207,7 +207,7 @@ func (s *Service) ImportDemo(ctx context.Context, invoice, actor string) (protoc
 	if err != nil {
 		return protocol.TreasuryDocument{}, ErrNotFound
 	}
-	if !bill.Invoice.TestMode || bill.Invoice.Status != "paid" || len(bill.Receipts) != 1 {
+	if bill.Invoice.SourceKind == "marketplace" || !bill.Invoice.TestMode || bill.Invoice.Status != "paid" || len(bill.Receipts) != 1 {
 		return protocol.TreasuryDocument{}, fmt.Errorf("%w: one verified paid demo receipt is required", ErrInvalid)
 	}
 	r := bill.Receipts[0]

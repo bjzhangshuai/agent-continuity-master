@@ -16,7 +16,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/agent-continuity/agent-continuity-master/internal/auth"
+	billservice "github.com/agent-continuity/agent-continuity-master/internal/billing"
 	"github.com/agent-continuity/agent-continuity-master/internal/metering"
+	"github.com/agent-continuity/agent-continuity-master/internal/payments"
 	"github.com/agent-continuity/agent-continuity-master/internal/reconcile"
 	"github.com/agent-continuity/agent-continuity-master/internal/storage"
 	pgstore "github.com/agent-continuity/agent-continuity-master/internal/storage/postgres"
@@ -267,6 +269,22 @@ func TestPostgresEventTransaction(t *testing.T) {
 	}
 	if completed, err := store.TransitionMarketplaceTransaction(ctx, transaction.ID, seller.ID, "completed", time.Now().UTC()); err != nil || completed.Status != "completed" {
 		t.Fatalf("marketplace transaction completion failed: %+v %v", completed, err)
+	}
+	if paid, err := store.HasCompletedMarketplaceTransaction(ctx, listing.ID, account.ID); err != nil || paid {
+		t.Fatalf("completed status without verified receipt granted paid access: %v %v", paid, err)
+	}
+	billingService := billservice.New(store, payments.NewRegistry(payments.Demo{}), billservice.DemoPriceBook(), "", make([]byte, 32))
+	transaction.Status = "completed"
+	purchase, err := billingService.IssuePurchase(ctx, transaction, billing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	purchase, paymentID, err := billingService.CreatePayment(ctx, account.ID, purchase.Invoice.ID, "demo", "integration-pay-"+suffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = billingService.Simulate(ctx, account.ID, purchase.Invoice.ID, paymentID, "succeeded"); err != nil {
+		t.Fatal(err)
 	}
 	if paid, err := store.HasCompletedMarketplaceTransaction(ctx, listing.ID, account.ID); err != nil || !paid {
 		t.Fatalf("completed transaction not found: paid=%v err=%v", paid, err)

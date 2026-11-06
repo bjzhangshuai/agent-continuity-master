@@ -5,8 +5,11 @@ import (
 	"errors"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	"github.com/agent-continuity/agent-continuity-master/internal/auth"
+	"github.com/agent-continuity/agent-continuity-master/internal/operations"
+	"github.com/agent-continuity/agent-continuity-master/internal/orchestration"
 	"github.com/agent-continuity/agent-continuity-master/internal/reconcile"
 	"github.com/agent-continuity/agent-continuity-master/internal/storage"
 	"github.com/agent-continuity/agent-continuity-master/pkg/protocol"
@@ -104,49 +107,6 @@ func (s *Server) a2a(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, rpcSuccess(request.ID, map[string]any{"id": params.TaskID, "status": map[string]any{"state": "working"}, "metadata": map[string]any{"append_result": result}}))
-	default:
-		writeJSON(w, http.StatusNotFound, rpcFailure(request.ID, -32601, "method not found", nil))
-	}
-}
-
-func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
-	var request rpcRequest
-	if !s.decodeJSON(w, r, &request) {
-		return
-	}
-	if request.JSONRPC != "2.0" {
-		writeJSON(w, http.StatusBadRequest, rpcFailure(request.ID, -32600, "invalid JSON-RPC request", nil))
-		return
-	}
-	if request.Method == "initialize" {
-		writeJSON(w, http.StatusOK, rpcSuccess(request.ID, map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}}, "serverInfo": map[string]string{"name": "agent-continuity", "version": protocol.ProtocolVersion}}))
-		return
-	}
-	claims, ok := s.authorize(w, r)
-	if !ok {
-		return
-	}
-	switch request.Method {
-	case "notifications/initialized":
-		w.WriteHeader(http.StatusAccepted)
-	case "tools/list":
-		writeJSON(w, http.StatusOK, rpcSuccess(request.ID, map[string]any{"tools": mcpTools()}))
-	case "tools/call":
-		var params struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		}
-		if json.Unmarshal(request.Params, &params) != nil {
-			writeJSON(w, http.StatusBadRequest, rpcFailure(request.ID, -32602, "invalid tool call", nil))
-			return
-		}
-		result, err := s.callMCPTool(r, claims, params.Name, params.Arguments)
-		if err != nil {
-			writeJSON(w, rpcHTTPStatus(err), rpcSuccess(request.ID, map[string]any{"isError": true, "content": []map[string]string{{"type": "text", "text": err.Error()}}}))
-			return
-		}
-		data, _ := json.Marshal(result)
-		writeJSON(w, http.StatusOK, rpcSuccess(request.ID, map[string]any{"content": []map[string]string{{"type": "text", "text": string(data)}}, "structuredContent": result, "isError": false}))
 	default:
 		writeJSON(w, http.StatusNotFound, rpcFailure(request.ID, -32601, "method not found", nil))
 	}
@@ -274,20 +234,43 @@ func (s *Server) continuityForAccount(r *http.Request, claims auth.Claims, taskI
 		}
 		snapshots = append(snapshots, snapshot)
 	}
+	runs, _, err := s.store.QueryRuns(r.Context(), task.AccountID, operations.RunQuery{TaskID: task.ID, Limit: 5})
+	if err != nil {
+		return protocol.ContinuityPackage{}, err
+	}
+	reports := []protocol.ExecutionReport{}
+	for _, o := range runs {
+		var run orchestration.Run
+		if err = json.Unmarshal(o.Data, &run); err != nil {
+			return protocol.ContinuityPackage{}, err
+		}
+		for i, step := range run.Steps {
+			output := step.Output
+			if len(output) > 16<<10 {
+				output = output[:16<<10]
+				for !utf8.ValidString(output) {
+					output = output[:len(output)-1]
+				}
+			}
+			reports = append(reports, protocol.ExecutionReport{OutputTruncated: len(output) < len(step.Output), RunID: run.ID, StepID: step.ID, Agent: run.Request.Steps[i].Agent, Status: step.Status, Output: output, UpdatedAt: run.Updated})
+		}
+	}
+
 	return protocol.ContinuityPackage{
-		ProtocolVersion: protocol.ProtocolVersion,
-		SchemaVersion:   protocol.SchemaVersion,
-		Capabilities:    append([]string(nil), protocol.ServerSyncCapabilities...),
-		TargetAgent:     target,
-		Task:            task,
-		Events:          events,
-		Artifacts:       visible,
-		Branches:        branches,
-		Participants:    participants,
-		AgentBindings:   agentBindings,
-		Conflicts:       conflicts,
-		Snapshots:       snapshots,
-		GeneratedAt:     now,
+		ExecutionReports: reports,
+		ProtocolVersion:  protocol.ProtocolVersion,
+		SchemaVersion:    protocol.SchemaVersion,
+		Capabilities:     append([]string(nil), protocol.ServerSyncCapabilities...),
+		TargetAgent:      target,
+		Task:             task,
+		Events:           events,
+		Artifacts:        visible,
+		Branches:         branches,
+		Participants:     participants,
+		AgentBindings:    agentBindings,
+		Conflicts:        conflicts,
+		Snapshots:        snapshots,
+		GeneratedAt:      now,
 	}, nil
 }
 

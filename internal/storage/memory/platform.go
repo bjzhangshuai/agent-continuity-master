@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"github.com/agent-continuity/agent-continuity-master/internal/billing"
 	"sort"
 	"time"
 
@@ -764,7 +765,14 @@ func (s *Store) HasCompletedMarketplaceTransaction(_ context.Context, listingID,
 	defer s.mu.RUnlock()
 	for _, value := range s.marketplaceTransactions {
 		if value.ListingID == listingID && value.BuyerAccountID == accountID && value.Status == "completed" {
-			return true, nil
+			if value.AmountMinor == 0 {
+				return true, nil
+			}
+			for _, d := range s.billingDocuments {
+				if d.Invoice.AccountID == accountID && billing.PurchasePaid(d, value.ID) {
+					return true, nil
+				}
+			}
 		}
 	}
 	return false, nil

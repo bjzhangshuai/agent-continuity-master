@@ -24,8 +24,14 @@ type Repository interface {
 }
 
 func SameRequest(a, b protocol.BillingInvoice) bool {
+	if a.SourceID != "" || b.SourceID != "" {
+		return a.AccountID == b.AccountID && a.BillingAccountID == b.BillingAccountID && a.OrganizationID == b.OrganizationID && a.SourceID == b.SourceID && a.SourceKind == b.SourceKind && a.AmountMinor == b.AmountMinor && a.Currency == b.Currency && a.TestMode == b.TestMode
+	}
 	return a.AccountID == b.AccountID && a.BillingAccountID == b.BillingAccountID && a.PeriodStart.Equal(b.PeriodStart) && a.PeriodEnd.Equal(b.PeriodEnd)
 }
 func Overlaps(a, b protocol.BillingInvoice) bool {
+	if a.SourceID != "" || b.SourceID != "" {
+		return false
+	}
 	return (a.OrganizationID != "" || a.AccountID == b.AccountID) && a.OrganizationID == b.OrganizationID && a.TestMode == b.TestMode && a.Status != "void" && b.Status != "void" && a.PeriodStart.Before(b.PeriodEnd) && b.PeriodStart.Before(a.PeriodEnd)
 }

@@ -15,7 +15,11 @@ const envelopeVersion byte = 1
 // Cipher encrypts service-managed secrets before they enter persistent storage.
 // The caller must provide a stable 256-bit master key from an external secret.
 type Cipher struct {
-	aead cipher.AEAD
+	aead     cipher.AEAD
+	envelope interface {
+		Encrypt([]byte, string) ([]byte, error)
+		Decrypt([]byte, string) ([]byte, error)
+	}
 }
 
 func New(key []byte) (*Cipher, error) {
@@ -33,6 +37,14 @@ func New(key []byte) (*Cipher, error) {
 	return &Cipher{aead: aead}, nil
 }
 
+// WithEnvelope enables external key wrapping; version-1 reads retain migration compatibility.
+func (c *Cipher) WithEnvelope(e interface {
+	Encrypt([]byte, string) ([]byte, error)
+	Decrypt([]byte, string) ([]byte, error)
+}) *Cipher {
+	c.envelope = e
+	return c
+}
 func DecodeKey(value string) ([]byte, error) {
 	key, err := base64.RawURLEncoding.DecodeString(value)
 	if err != nil {
@@ -45,6 +57,9 @@ func DecodeKey(value string) ([]byte, error) {
 }
 
 func (c *Cipher) Encrypt(plaintext []byte, associatedData string) ([]byte, error) {
+	if c != nil && c.envelope != nil {
+		return c.envelope.Encrypt(plaintext, associatedData)
+	}
 	if c == nil || c.aead == nil {
 		return nil, errors.New("secret cipher is not configured")
 	}
@@ -60,6 +75,12 @@ func (c *Cipher) Encrypt(plaintext []byte, associatedData string) ([]byte, error
 }
 
 func (c *Cipher) Decrypt(envelope []byte, associatedData string) ([]byte, error) {
+	if c != nil && len(envelope) > 0 && envelope[0] == 2 {
+		if c.envelope == nil {
+			return nil, errors.New("KMS not configured")
+		}
+		return c.envelope.Decrypt(envelope, associatedData)
+	}
 	if c == nil || c.aead == nil {
 		return nil, errors.New("secret cipher is not configured")
 	}

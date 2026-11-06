@@ -186,6 +186,11 @@ public data class SyncHelloRequest(
 public class APIException(public val status: Int, public val code: String, message: String) : RuntimeException("API $status $code: $message")
 
 public class AgentContinuityClient(public val baseUrl: String, public var token: String = "", public val timeoutMillis: Int = 30_000) {
+    public fun createRun(plan: JsonObject, key: String): JsonElement = requestJson("POST", "/v1/orchestration/runs", plan, mapOf("Idempotency-Key" to key))
+    public fun getRun(id: String): JsonElement = requestJson("GET", "/v1/orchestration/runs/${path(id)}")
+    public fun controlRun(id: String, action: String): JsonElement = requestJson("POST", "/v1/orchestration/runs/${path(id)}/${path(action)}")
+    public fun issueFiscal(id: String, buyer: JsonObject): JsonElement = requestJson("POST", "/v1/billing/invoices/${path(id)}/fiscal", buyer)
+    public fun getSettlement(id: String): JsonElement = requestJson("GET", "/v1/commerce/settlements/${path(id)}")
     public fun listInvoices(): JsonElement = requestJson("GET", "/v1/billing/invoices?limit=200")
     public fun getInvoice(id: String): JsonElement = requestJson("GET", "/v1/billing/invoices/${path(id)}")
     public fun quoteInvoice(period: JsonObject): JsonElement = requestJson("POST", "/v1/billing/quote", period)

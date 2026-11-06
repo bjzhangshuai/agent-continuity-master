@@ -96,4 +96,9 @@ jobs:
           GOMAXPROCS: '2'
           CONTINUITY_ARCHIVE_TEST_DATABASE_URL: postgres://continuity:ci-archive-test-only@127.0.0.1:5432/continuity_archive_test_ci?sslmode=disable
           CONTINUITY_TEST_DATABASE_URL: postgres://continuity:ci-archive-test-only@127.0.0.1:5432/continuity_archive_test_ci?sslmode=disable
-        run: go test -race -p 2 -count=1 -v ./tests/integration -run 'Test(ArchiveJetStreamTransaction|PostgresEventTransaction)$' -timeout 180s
+        run: go test -race -p 2 -count=1 -v ./tests/integration -run 'Test(ArchiveJetStreamTransaction|PostgresEventTransaction|PostgresWorkflowPersistenceAndFencing)$' -timeout 180s
+
+      - name: Isolated orchestration, settlement, fiscal and KMS HTTP E2E
+        env:
+          CONTINUITY_WORKFLOW_TEST_DATABASE_URL: postgres://continuity:ci-archive-test-only@127.0.0.1:5432/continuity_archive_test_ci?sslmode=disable
+        run: python3 scripts/test-workflows-e2e.py

@@ -1,5 +1,7 @@
 # Agent Continuity
 
+本轮新增能力、模拟边界与部署方式见 [五项闭环交付与验收](docs/workflow-closure-2026-11-07.zh-CN.md)：A2A/MCP、多 Agent 编排、分账提现、蓝/红字票据、四云 KMS。
+
 本地 CodeBuddy 插件、MinIO、跨设备和支付演示的查看步骤见
 [CodeBuddy 本地闭环实验](docs/codebuddy-local-e2e.zh-CN.md)。
 

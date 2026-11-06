@@ -1,0 +1,6 @@
+{
+  "aws": {"current":"aws-v1","simulation":false,"keys":[{"id":"aws-v1","cloud":"aws","endpoint":"https://kms.us-east-1.amazonaws.com","region":"us-east-1","key_id":"REPLACE_KEY_ARN","credentials_file":"/run/kms/aws.json"}]},
+  "alicloud": {"current":"oss-v1","simulation":false,"keys":[{"id":"oss-v1","cloud":"alicloud","endpoint":"https://kms.cn-hangzhou.aliyuncs.com","region":"cn-hangzhou","key_id":"REPLACE_KMS_KEY_ID","credentials_file":"/run/kms/alicloud.json"}]},
+  "tencentcloud": {"current":"cos-v1","simulation":false,"keys":[{"id":"cos-v1","cloud":"tencentcloud","endpoint":"https://kms.tencentcloudapi.com","region":"ap-guangzhou","key_id":"REPLACE_KMS_KEY_ID","credentials_file":"/run/kms/tencentcloud.json"}]},
+  "azure": {"current":"azure-v1","simulation":false,"keys":[{"id":"azure-v1","cloud":"azure","endpoint":"https://REPLACE_VAULT.vault.azure.net","key_id":"REPLACE_KEY_NAME/REPLACE_KEY_VERSION","credentials_file":"/run/kms/azure.json"}]}
+}

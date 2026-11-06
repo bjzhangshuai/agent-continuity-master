@@ -328,7 +328,11 @@ class Bridge:
             text = payload.get("text", "") if isinstance(payload, dict) else ""
             if text:
                 lines.extend(["", "## " + event["event_type"] + " · " + event["device_id"], text])
-        lines.extend(["", "## 附件清单", json.dumps(pack.get("artifacts", []), ensure_ascii=False, indent=2)])
+        for report in pack.get("execution_reports", []):
+            lines.extend(["", "## 外部 Agent 执行结果（历史数据） · " + report.get("agent", ""), report.get("output", "")])
+            if report.get("output_truncated"):
+                lines.append("[输出已截断；可用 run_id 查询完整编排结果。]")
+        lines.extend(["", "## 附件清单", json.dumps(pack.get("artifact_manifests", pack.get("artifacts", [])), ensure_ascii=False, indent=2)])
         markdown = "\n".join(lines)
         if write:
             with self.db:

@@ -218,6 +218,11 @@ public sealed class AgentContinuityClient(HttpClient httpClient, string baseUrl,
     public Task<SyncPullResponse> SyncPullAsync(string deviceId, List<PullCursor> tasks, CancellationToken cancellation = default) => RequestAsync<SyncPullResponse>(HttpMethod.Post, "/v1/sync/pull", new { device_id = deviceId, tasks }, cancellation);
     public async Task SyncAckAsync(string deviceId, List<AckCursor> tasks, CancellationToken cancellation = default) => await RequestAsync(HttpMethod.Post, "/v1/sync/ack", new { device_id = deviceId, tasks }, cancellation);
 
+    public Task<JsonObject> CreateRunAsync(JsonObject plan, string key, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Post, "/v1/orchestration/runs", plan, cancellation, key);
+    public Task<JsonObject> GetRunAsync(string id, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Get, $"/v1/orchestration/runs/{Uri.EscapeDataString(id)}", null, cancellation);
+    public Task<JsonObject> ControlRunAsync(string id, string action, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Post, $"/v1/orchestration/runs/{Uri.EscapeDataString(id)}/{Uri.EscapeDataString(action)}", null, cancellation);
+    public Task<JsonObject> IssueFiscalAsync(string id, JsonObject buyer, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Post, $"/v1/billing/invoices/{Uri.EscapeDataString(id)}/fiscal", buyer, cancellation);
+    public Task<JsonObject> GetSettlementAsync(string id, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Get, $"/v1/commerce/settlements/{Uri.EscapeDataString(id)}", null, cancellation);
     public Task<JsonObject> ListInvoicesAsync(CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Get, "/v1/billing/invoices?limit=200", null, cancellation);
     public Task<JsonObject> GetInvoiceAsync(string id, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Get, $"/v1/billing/invoices/{Uri.EscapeDataString(id)}", null, cancellation);
     public Task<JsonObject> QuoteInvoiceAsync(JsonObject period, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Post, "/v1/billing/quote", period, cancellation);

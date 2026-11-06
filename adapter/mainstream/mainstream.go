@@ -169,6 +169,7 @@ func (adapter Adapter) Resume(_ context.Context, request adaptersdk.ResumeReques
 		"target_agent":       adapter.Name(),
 		"task":               request.Task,
 		"events":             request.Events,
+		"execution_reports":  request.ExecutionReports,
 		"artifact_manifests": request.Artifacts,
 	}, "", "  ")
 	if err != nil {

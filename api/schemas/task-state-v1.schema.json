@@ -5,6 +5,7 @@
   "type": "object",
   "required": ["schema_version", "protocol_version", "capabilities", "task"],
   "properties": {
+    "execution_reports": {"type": "array", "items": {"type": "object", "required": ["run_id", "step_id", "agent", "status", "output", "updated_at"], "properties": {"run_id": {"type": "string"}, "step_id": {"type": "string"}, "agent": {"type": "string"}, "status": {"type": "string"}, "output": {"type": "string"}, "updated_at": {"type": "string", "format": "date-time"}, "output_truncated": {"type": "boolean"}}, "additionalProperties": false}},
     "schema_version": {"const": "1.0"},
     "protocol_version": {"const": "1.0"},
     "capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},

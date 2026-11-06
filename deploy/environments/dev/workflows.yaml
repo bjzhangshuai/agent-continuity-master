@@ -1,0 +1,9 @@
+# Optional development overlay. No extra Pods, charts or cloud calls.
+workflows:
+  demoEnabled: true
+kms:
+  config:
+    current: simulated-aws-v1
+    simulation: true
+    keys:
+      - {id: simulated-aws-v1, cloud: aws, key_id: simulated-key}

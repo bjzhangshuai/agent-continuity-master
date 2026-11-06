@@ -12,6 +12,7 @@
   <script src="/treasury.js" defer></script>
   <script src="/portal.js" defer></script>
   <script src="/archive.js" defer></script>
+  <script src="/workflows.js" defer></script>
 </head>
 <body>
   <header>
@@ -47,8 +48,18 @@
     <button class="tab" data-panel="treasury-panel" data-zh="收款与提现" data-en="Collections & Payouts">收款与提现</button>
     <button class="tab" data-panel="developer-panel" data-zh="开发者" data-en="Developer">开发者</button>
     <button class="tab" data-panel="marketplace-panel" data-zh="市场" data-en="Marketplace">市场</button>
+    <button class="tab" data-panel="workflows-panel" data-zh="编排、分账与开票" data-en="Workflows & Settlement">编排、分账与开票</button>
   </nav>
   <main>
+    <section id="workflows-panel" class="panel">
+      <div class="section-heading"><h2 data-zh="编排、分账与开票" data-en="Workflows & Settlement">编排、分账与开票</h2><button id="refresh-workflows" data-zh="刷新" data-en="Refresh">刷新</button></div>
+      <p class="muted" data-zh="演示 Agent 与模拟票据会明确标注；实际收付款和正式开票需要配置服务商。" data-en="Demo agents and simulated invoices are labelled. Live collection and tax issuance need provider configuration.">演示 Agent 与模拟票据会明确标注；实际收付款和正式开票需要配置服务商。</p>
+      <div class="card"><h3 data-zh="多 Agent 协作" data-en="Agent orchestration">多 Agent 协作</h3><p id="execution-agents"></p><label data-zh="任务目标" data-en="Objective">任务目标</label><textarea id="execution-objective" rows="3">研究跨设备任务接续，生成方案并交叉审查。</textarea><button id="create-execution" data-zh="创建需审批的三步任务" data-en="Create a three-step plan requiring approval">创建需审批的三步任务</button><div id="execution-runs" class="feed"></div></div>
+      <div class="card"><h3 data-zh="分账与卖方提现" data-en="Split settlement & seller payouts">分账与卖方提现</h3><p class="muted" data-zh="使用支付服务商签发的收款账户 token；不要填写银行卡号或支付密码。" data-en="Use a provider-issued recipient token; do not enter bank numbers or payment passwords.">使用支付服务商签发的收款账户 token；不要填写银行卡号或支付密码。</p><label>Provider account token <input id="recipient-token" autocomplete="off"></label><select id="recipient-kind"><option value="bank">Bank / 银行</option><option value="wechat">WeChat / 微信</option><option value="alipay">Alipay / 支付宝</option><option value="paypal">PayPal</option></select><button id="verify-recipient" data-zh="验证收款账户" data-en="Verify recipient">验证收款账户</button><div id="settlement-list" class="feed"></div></div>
+      <div class="card"><h3 data-zh="申请开票与退款红字票据" data-en="Fiscal invoices & refund credits">申请开票与退款红字票据</h3><label>Invoice ID <input id="fiscal-invoice"></label><label data-zh="购方名称" data-en="Buyer name">购方名称</label><input id="fiscal-buyer"><label data-zh="税号" data-en="Tax identifier">税号</label><input id="fiscal-tax"><button id="issue-fiscal" data-zh="申请开票" data-en="Request invoice">申请开票</button><div id="fiscal-list" class="feed"></div></div>
+      <div class="card"><h3 data-zh="服务端密钥保护" data-en="Server key protection">服务端密钥保护</h3><p id="kms-mode"></p></div>
+      <pre id="workflow-detail" aria-live="polite"></pre>
+    </section>
     <section id="archive-panel" class="panel"><div class="section-title"><div><span class="eyebrow">DURABLE CONTENT PIPELINE</span><h2 data-zh="对象存储与归档队列" data-en="Object storage & archival queue">对象存储与归档队列</h2></div><button id="archive-refresh" data-zh="刷新状态" data-en="Refresh">刷新状态</button></div><div id="archive-content"></div></section>
     <section id="tenant-panel" class="panel"><div class="section-title"><div><span class="eyebrow">TENANT FINANCE</span><h2 data-zh="租户费用中心" data-en="Tenant billing center">租户费用中心</h2><p class="muted" data-zh="先确认租户与角色，再查看账单、发起支付和下载回执。集团代付必须双方授权。" data-en="Select your tenant and role before viewing bills, paying, or downloading receipts. Group billing needs mutual consent.">先确认租户与角色，再查看账单、发起支付和下载回执。集团代付必须双方授权。</p></div><button id="portal-refresh" data-zh="刷新租户状态" data-en="Refresh tenants">刷新租户状态</button></div><div id="portal-tenant-selector" class="card section-actions"></div><div id="portal-tenant-content"></div><div id="portal-invoice" class="card" hidden></div></section>
     <section id="platform-panel" class="panel"><div class="section-title"><div><span class="eyebrow">SCOPED ADMINISTRATION</span><h2 data-zh="平台分级管理" data-en="Scoped platform administration">平台分级管理</h2><p class="muted" data-zh="超级管理员 → 总部管理 → 区域 / 业务线管理 → 运营、客服、财务、审计。后台授权不会自动成为租户成员。" data-en="Super admin → HQ → regional / business administration → operations, support, finance, audit. Platform grants do not make users tenant members.">超级管理员 → 总部管理 → 区域 / 业务线管理 → 运营、客服、财务、审计。后台授权不会自动成为租户成员。</p></div></div><div id="portal-platform-content"></div></section>

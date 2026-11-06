@@ -217,7 +217,7 @@ func resumeAdapter(ctx context.Context, api *client.Client, stateStore *daemon.S
 		}
 		native = &adaptersdk.NativeSession{Provider: provider, SessionRef: reference, Metadata: metadata}
 	}
-	result, err := adapter.Resume(ctx, adaptersdk.ResumeRequest{Task: pack.Task, Events: pack.Events, Artifacts: pack.Artifacts, Native: native})
+	result, err := adapter.Resume(ctx, adaptersdk.ResumeRequest{ExecutionReports: pack.ExecutionReports, Task: pack.Task, Events: pack.Events, Artifacts: pack.Artifacts, Native: native})
 	if err != nil {
 		return err
 	}

@@ -24,7 +24,7 @@ def run(args, **kw):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--version', default='0.2.0-local')
+    p.add_argument('--version', default='0.3.0-local')
     p.add_argument('--host-only', action='store_true')
     a = p.parse_args()
     if not all(c.isalnum() or c in '.-_' for c in a.version):
@@ -66,7 +66,7 @@ def main():
                 destination.parent.mkdir(parents=True,exist_ok=True)
                 print('Building',goos,arch,binary,flush=True)
                 run(['go','build','-p','2','-trimpath','-o',str(destination),'./cmd/'+binary],env={**os.environ,'CGO_ENABLED':'0','GOMAXPROCS':'2','GOOS':goos,'GOARCH':arch})
-        metadata={'version':a.version,'git_commit':run(['git','rev-parse','HEAD'],capture_output=True,text=True).stdout.strip(),'includes_worktree_changes':bool(run(['git','status','--porcelain'],capture_output=True).stdout),'client_targets':targets,'air_gapped':False,'required':['Docker or Kubernetes + Helm','namespace secrets','Python 3 for installer/preflight','external merchant credentials only for live payments']}
+        metadata={'version':a.version,'go_toolchain':run(['go','version'],capture_output=True,text=True).stdout.strip(),'git_commit':run(['git','rev-parse','HEAD'],capture_output=True,text=True).stdout.strip(),'includes_worktree_changes':bool(run(['git','status','--porcelain'],capture_output=True).stdout),'client_targets':targets,'air_gapped':False,'required':['Docker or Kubernetes + Helm','namespace secrets','Python 3 for installer/preflight','external merchant credentials only for live payments']}
         (stage/'RELEASE.json').write_text(json.dumps(metadata,indent=2)+'\n')
         checks=[]
         for path in sorted(stage.rglob('*')):

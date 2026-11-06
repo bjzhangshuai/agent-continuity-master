@@ -112,6 +112,7 @@ func (Adapter) Resume(_ context.Context, request adaptersdk.ResumeRequest) (adap
 		"protocol_version":   adaptersdk.ContractVersion,
 		"task":               request.Task,
 		"events":             request.Events,
+		"execution_reports":  request.ExecutionReports,
 		"artifact_manifests": request.Artifacts,
 	}, "", "  ")
 	if err != nil {

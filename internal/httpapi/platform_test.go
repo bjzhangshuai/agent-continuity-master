@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/agent-continuity/agent-continuity-master/internal/payments"
 	"io"
 	"net/http"
 	"net/url"
@@ -281,6 +282,7 @@ func TestOAuthMCPA2AMarketplaceAndUsage(t *testing.T) {
 
 func TestBillingAndAgentToAgentMarketplaceTransaction(t *testing.T) {
 	f := newFixture(t)
+	f.api.billing.Providers = payments.NewRegistry(payments.Demo{})
 	_, sellerToken := f.account("marketplace-seller")
 	_, buyerToken := f.account("marketplace-buyer")
 	status, data := f.request(http.MethodPost, "/v1/billing/accounts", buyerToken, map[string]any{"plan": "developer", "currency": "usd"}, nil)
@@ -331,6 +333,24 @@ func TestBillingAndAgentToAgentMarketplaceTransaction(t *testing.T) {
 	if status != http.StatusConflict {
 		t.Fatalf("buyer completed seller transaction: %d", status)
 	}
+	status, _ = f.request(http.MethodPost, "/v1/marketplace/transactions/"+transaction.ID+"/complete", sellerToken, nil, nil)
+	if status != 402 {
+		t.Fatalf("unpaid completion should fail: %d", status)
+	}
+	status, data = f.request(http.MethodPost, "/v1/marketplace/transactions/"+transaction.ID+"/checkout", buyerToken, map[string]any{"billing_account_id": billing.ID, "provider": "demo"}, map[string]string{"Idempotency-Key": "market-checkout-1"})
+	if status != 201 {
+		t.Fatalf("checkout: %d %s", status, data)
+	}
+	var checkout struct {
+		Bill      protocol.BillingDocument `json:"bill"`
+		PaymentID string                   `json:"payment_id"`
+	}
+	_ = json.Unmarshal(data, &checkout)
+	status, data = f.request(http.MethodPost, "/v1/billing/invoices/"+checkout.Bill.Invoice.ID+"/payments/"+checkout.PaymentID+"/simulate", buyerToken, map[string]string{"outcome": "succeeded"}, nil)
+	if status != 200 {
+		t.Fatalf("confirm: %d %s", status, data)
+	}
+
 	status, data = f.request(http.MethodPost, "/v1/marketplace/transactions/"+transaction.ID+"/complete", sellerToken, nil, nil)
 	if status != http.StatusOK || decode[protocol.MarketplaceTransaction](t, data).Status != "completed" {
 		t.Fatalf("seller complete: %d %s", status, data)

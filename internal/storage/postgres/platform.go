@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/agent-continuity/agent-continuity-master/internal/billing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -680,9 +681,27 @@ func (s *Store) TransitionMarketplaceTransaction(ctx context.Context, transactio
 }
 
 func (s *Store) HasCompletedMarketplaceTransaction(ctx context.Context, listingID, accountID string) (bool, error) {
-	var exists bool
-	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM marketplace_transactions WHERE listing_id=$1 AND buyer_account_id=$2 AND status='completed')`, listingID, accountID).Scan(&exists)
-	return exists, err
+	rows, err := s.pool.Query(ctx, `SELECT t.transaction_id,t.amount_minor,b.document FROM marketplace_transactions t LEFT JOIN billing_documents b ON b.account_id=t.buyer_account_id AND b.document->'invoice'->>'source_id'=t.transaction_id WHERE t.listing_id=$1 AND t.buyer_account_id=$2 AND t.status='completed'`, listingID, accountID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var amount int64
+		var raw []byte
+		if err = rows.Scan(&id, &amount, &raw); err != nil {
+			return false, err
+		}
+		if amount == 0 {
+			return true, nil
+		}
+		var d protocol.BillingDocument
+		if len(raw) > 0 && json.Unmarshal(raw, &d) == nil && billing.PurchasePaid(d, id) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 const marketplaceTransactionSelect = `SELECT transaction_id,listing_id,buyer_account_id,seller_account_id,COALESCE(buyer_agent_id,''),COALESCE(seller_agent_id,''),COALESCE(task_id,''),quantity,amount_minor,commission_minor,currency,status,idempotency_key,metadata,created_at,updated_at FROM marketplace_transactions`

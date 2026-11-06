@@ -261,12 +261,53 @@ func (c *Client) Reconcile(ctx context.Context, input protocol.ReconcileRequest)
 // MCP forwards one JSON-RPC message to the platform MCP endpoint. A nil
 // response represents a JSON-RPC notification accepted without a reply.
 func (c *Client) MCP(ctx context.Context, input json.RawMessage) (json.RawMessage, error) {
-	var result json.RawMessage
-	if err := c.Do(ctx, http.MethodPost, "/v1/mcp", input, &result); err != nil {
+	var q struct {
+		Method string `json:"method"`
+		Params struct {
+			Name string                     `json:"name"`
+			Meta map[string]json.RawMessage `json:"_meta"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(input, &q); err != nil {
 		return nil, err
 	}
-	return result, nil
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/v1/mcp", bytes.NewReader(input))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	var version string
+	_ = json.Unmarshal(q.Params.Meta["io.modelcontextprotocol/protocolVersion"], &version)
+	if version != "" {
+		req.Header.Set("MCP-Protocol-Version", version)
+		req.Header.Set("Mcp-Method", q.Method)
+		if q.Params.Name != "" {
+			req.Header.Set("Mcp-Name", q.Params.Name)
+		}
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == 202 {
+		return nil, nil
+	}
+	var message struct {
+		JSONRPC string `json:"jsonrpc"`
+	}
+	if json.Unmarshal(raw, &message) == nil && message.JSONRPC == "2.0" {
+		return raw, nil
+	}
+	return nil, &APIError{Status: resp.StatusCode, Code: "mcp_transport_error", Message: "MCP transport/authentication rejected request"}
 }
+
 func (c *Client) CreateInvitation(ctx context.Context, taskID string, permission protocol.Permission, ttlSeconds int64) (string, error) {
 	var result struct {
 		Token string `json:"token"`

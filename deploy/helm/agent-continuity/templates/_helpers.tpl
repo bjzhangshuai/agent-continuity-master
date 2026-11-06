@@ -17,7 +17,7 @@ app.kubernetes.io/component: server
 {{- define "agent-continuity.secretChecksum" -}}
 {{- $all := dict "revision" .Values.secretRevision -}}
 {{- $root := . -}}
-{{- range list .Values.existingSecret .Values.databaseTLS.existingSecret .Values.archive.existingSecret .Values.archive.storageSecret .Values.archive.broker.existingSecret .Values.payments.existingSecret .Values.treasury.existingSecret -}}
+{{- range list .Values.existingSecret .Values.databaseTLS.existingSecret .Values.archive.existingSecret .Values.archive.storageSecret .Values.archive.broker.existingSecret .Values.payments.existingSecret .Values.treasury.existingSecret .Values.workflows.existingSecret .Values.kms.existingSecret -}}
 {{- if . -}}{{- $secret := lookup "v1" "Secret" $root.Release.Namespace . -}}{{- $_ := set $all . ($secret.data | default dict) -}}{{- end -}}
 {{- end -}}
 {{- toJson $all | sha256sum -}}

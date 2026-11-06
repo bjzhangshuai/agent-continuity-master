@@ -12,6 +12,8 @@ import (
 )
 
 type Config struct {
+	WorkflowConfigJSON   string
+	KMSConfigJSON        string
 	ArchiveConfigJSON    string
 	PaymentConfigJSON    string
 	TreasuryConfigJSON   string
@@ -47,6 +49,14 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	workflowConfig, err := envOrFile("CONTINUITY_WORKFLOW_CONFIG", "CONTINUITY_WORKFLOW_CONFIG_FILE")
+	if err != nil {
+		return Config{}, err
+	}
+	kmsConfig, err := envOrFile("CONTINUITY_KMS_CONFIG", "CONTINUITY_KMS_CONFIG_FILE")
+	if err != nil {
+		return Config{}, err
+	}
 	archiveConfig, err := envOrFile("CONTINUITY_ARCHIVE_CONFIG", "CONTINUITY_ARCHIVE_CONFIG_FILE")
 	if err != nil {
 		return Config{}, err
@@ -99,7 +109,7 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	cfg := Config{
+	cfg := Config{WorkflowConfigJSON: workflowConfig, KMSConfigJSON: kmsConfig,
 		ArchiveConfigJSON:    archiveConfig,
 		PaymentConfigJSON:    paymentConfig,
 		TreasuryConfigJSON:   treasuryConfig,

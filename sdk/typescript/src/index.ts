@@ -179,6 +179,11 @@ export class Client {
     return text;
   }
 
+  createRun(plan:Record<string,unknown>,key:string):Promise<Record<string,unknown>> {return this.request("POST","/v1/orchestration/runs",plan,{"Idempotency-Key":key});}
+  getRun(id:string):Promise<Record<string,unknown>> {return this.request("GET",`/v1/orchestration/runs/${encodeURIComponent(id)}`);}
+  controlRun(id:string,action:"approve"|"cancel"):Promise<Record<string,unknown>> {return this.request("POST",`/v1/orchestration/runs/${encodeURIComponent(id)}/${action}`);}
+  issueFiscal(id:string,buyer:{buyer_name:string;tax_id:string}):Promise<Record<string,unknown>> {return this.request("POST",`/v1/billing/invoices/${encodeURIComponent(id)}/fiscal`,buyer);}
+  getSettlement(id:string):Promise<Record<string,unknown>> {return this.request("GET",`/v1/commerce/settlements/${encodeURIComponent(id)}`);}
   listInvoices(): Promise<Record<string,unknown>> {return this.request("GET","/v1/billing/invoices?limit=200");}
   getInvoice(id:string): Promise<Record<string,unknown>> {return this.request("GET",`/v1/billing/invoices/${encodeURIComponent(id)}`);}
   quoteInvoice(period:{billing_account_id:string;period_start:string;period_end:string}): Promise<Record<string,unknown>> {return this.request("POST","/v1/billing/quote",period);}

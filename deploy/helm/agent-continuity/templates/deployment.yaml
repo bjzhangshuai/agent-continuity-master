@@ -99,6 +99,12 @@ spec:
             - configMapRef:
                 name: {{ include "agent-continuity.fullname" . }}-config
           env:
+            {{- if .Values.workflows.existingSecret }}
+            - {name: CONTINUITY_WORKFLOW_CONFIG_FILE, value: /run/workflows/config.json}
+            {{- end }}
+            {{- if .Values.kms.existingSecret }}
+            - {name: CONTINUITY_KMS_CONFIG_FILE, value: /run/kms/config.json}
+            {{- end }}
             {{- if .Values.archive.existingSecret }}
             - {name: CONTINUITY_ARCHIVE_CONFIG_FILE, value: /run/archive/config.json}
             {{- end }}
@@ -180,6 +186,12 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
+            {{- if .Values.workflows.existingSecret }}
+            - {name: workflow-secrets, mountPath: /run/workflows, readOnly: true}
+            {{- end }}
+            {{- if .Values.kms.existingSecret }}
+            - {name: kms-secrets, mountPath: /run/kms, readOnly: true}
+            {{- end }}
             {{- if .Values.archive.storageSecret }}
             - {name: archive-storage, mountPath: /run/archive-storage, readOnly: true}
             {{- end }}
@@ -204,6 +216,14 @@ spec:
             - name: tmp
               mountPath: /tmp
       volumes:
+        {{- if .Values.workflows.existingSecret }}
+        - name: workflow-secrets
+          secret: {secretName: {{ .Values.workflows.existingSecret }}, defaultMode: 0440}
+        {{- end }}
+        {{- if .Values.kms.existingSecret }}
+        - name: kms-secrets
+          secret: {secretName: {{ .Values.kms.existingSecret }}, defaultMode: 0440}
+        {{- end }}
         {{- if .Values.archive.storageSecret }}
         - name: archive-storage
           secret: {secretName: {{ .Values.archive.storageSecret }}, defaultMode: 0440}

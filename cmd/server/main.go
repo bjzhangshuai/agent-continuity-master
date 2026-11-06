@@ -18,6 +18,7 @@ import (
 	"github.com/agent-continuity/agent-continuity-master/internal/config"
 	"github.com/agent-continuity/agent-continuity-master/internal/httpapi"
 	"github.com/agent-continuity/agent-continuity-master/internal/identity"
+	"github.com/agent-continuity/agent-continuity-master/internal/kms"
 	"github.com/agent-continuity/agent-continuity-master/internal/observability"
 	"github.com/agent-continuity/agent-continuity-master/internal/payments"
 	"github.com/agent-continuity/agent-continuity-master/internal/secrets"
@@ -25,6 +26,7 @@ import (
 	"github.com/agent-continuity/agent-continuity-master/internal/storage/memory"
 	pgstore "github.com/agent-continuity/agent-continuity-master/internal/storage/postgres"
 	"github.com/agent-continuity/agent-continuity-master/internal/treasury"
+	"github.com/agent-continuity/agent-continuity-master/internal/workflows"
 )
 
 func main() {
@@ -163,6 +165,19 @@ func main() {
 		logger.Error("secret cipher", "error", err)
 		os.Exit(1)
 	}
+	keyManager, err := kms.Build(cfg.KMSConfigJSON, masterKey)
+	if err != nil {
+		logger.Error("invalid KMS configuration", "error", err)
+		os.Exit(2)
+	}
+	if keyManager != nil {
+		secretCipher.WithEnvelope(keyManager)
+	}
+	agents, commerceGateway, simulation, err := workflows.Build(cfg.WorkflowConfigJSON)
+	if err != nil {
+		logger.Error("invalid workflow configuration", "error", err)
+		os.Exit(2)
+	}
 	var oidcVerifier *identity.OIDCVerifier
 	if cfg.OIDCIssuer != "" {
 		oidcVerifier, err = identity.NewOIDCVerifier(cfg.OIDCIssuer, cfg.OIDCAudience, []byte(cfg.OIDCJWKS))
@@ -204,6 +219,7 @@ func main() {
 	}
 	api := httpapi.New(store, artifacts, tokens, cfg.BootstrapToken, cfg.MaxBodyBytes, logger,
 		httpapi.WithArchive(archiveWorker),
+		httpapi.WithKMS(keyManager), httpapi.WithOrchestration(agents), httpapi.WithCommerce(commerceGateway, simulation),
 		httpapi.WithPlatformAdmins(os.Getenv("CONTINUITY_PLATFORM_SUPER_ADMINS")),
 		httpapi.WithTreasury(treasuryConfig.OwnerAccountID, treasuryConfig.DemoEnabled, payoutProvider),
 		httpapi.WithPayments(providers, priceBook, paymentConfig.PublicBaseURL),

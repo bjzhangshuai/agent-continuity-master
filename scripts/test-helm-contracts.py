@@ -82,3 +82,14 @@ assert any(d['metadata']['name']=='continuity-otel' for d in full)
 assert any(d['metadata']['name']=='continuity-tempo' for d in full)
 print('MinIO: TLS, probes, non-root, retained PVC, private quota bucket, scoped credentials PASS')
 print('optional Prometheus/Grafana + KEDA CRDs + OTel/Tempo: full render PASS; dev installs none of these')
+
+secure=render('production','--set','workflows.existingSecret=workflow-contract','--set','kms.existingSecret=kms-contract')
+server=next(d for d in secure if d and d['kind']=='Deployment' and d['metadata']['name']=='agent-continuity')['spec']['template']['spec']
+container=server['containers'][0]
+env={v['name']:v.get('value') for v in container['env']}
+assert env['CONTINUITY_WORKFLOW_CONFIG_FILE']=='/run/workflows/config.json'
+assert env['CONTINUITY_KMS_CONFIG_FILE']=='/run/kms/config.json'
+for name in ('workflow-secrets','kms-secrets'):
+    assert next(m for m in container['volumeMounts'] if m['name']==name)['readOnly']
+    assert next(v for v in server['volumes'] if v['name']==name)['secret']['defaultMode']==0o440
+print('workflow and KMS Secret mounts, configuration and least privilege PASS')

@@ -79,6 +79,21 @@ class Client:
             raise APIError(error.code, detail.get("code", "http_error"), detail.get("message", error.reason)) from error
         return raw.decode("utf-8") if response_text else (None if not raw else json.loads(raw))
 
+    def create_run(self, plan: Mapping[str, Any], key: str) -> dict[str, Any]:
+        return self.request("POST", "/v1/orchestration/runs", plan, extra_headers={"Idempotency-Key": key})
+
+    def get_run(self, run_id: str) -> dict[str, Any]:
+        return self.request("GET", f"/v1/orchestration/runs/{quote(run_id, safe='')}")
+
+    def control_run(self, run_id: str, action: str) -> dict[str, Any]:
+        return self.request("POST", f"/v1/orchestration/runs/{quote(run_id, safe='')}/{quote(action, safe='')}")
+
+    def issue_fiscal(self, invoice_id: str, buyer: Mapping[str, Any]) -> dict[str, Any]:
+        return self.request("POST", f"/v1/billing/invoices/{quote(invoice_id, safe='')}/fiscal", buyer)
+
+    def get_settlement(self, transaction_id: str) -> dict[str, Any]:
+        return self.request("GET", f"/v1/commerce/settlements/{quote(transaction_id, safe='')}")
+
     def list_invoices(self) -> dict[str, Any]:
         return self.request("GET", "/v1/billing/invoices?limit=200")
 

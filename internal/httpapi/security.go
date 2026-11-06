@@ -21,6 +21,7 @@ import (
 type requestIDContextKey struct{}
 
 var allowedDelegatedScopes = map[string]struct{}{
+	"secrets:read": {}, "secrets:write": {},
 	"tasks:read": {}, "tasks:write": {}, "tasks:admin": {},
 	"devices:read": {}, "devices:write": {},
 	"invitations:accept": {}, "invitations:write": {},

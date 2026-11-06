@@ -1,6 +1,12 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  {{- if not .Values.workflows.existingSecret }}
+  CONTINUITY_WORKFLOW_CONFIG: {{ dict "demo_enabled" .Values.workflows.demoEnabled "allow_live" false | toJson | quote }}
+  {{- end }}
+  {{- if and (not .Values.kms.existingSecret) .Values.kms.config }}
+  CONTINUITY_KMS_CONFIG: {{ .Values.kms.config | toJson | quote }}
+  {{- end }}
   name: {{ include "agent-continuity.fullname" . }}-config
   labels:
     {{- include "agent-continuity.labels" . | nindent 4 }}

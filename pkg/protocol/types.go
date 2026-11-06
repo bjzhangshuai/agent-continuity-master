@@ -147,18 +147,30 @@ type Invitation struct {
 	RevokedAt            *time.Time      `json:"revoked_at,omitempty"`
 }
 
+// ExecutionReport contains server execution output; it does not impersonate a
+// signed device event. Consumers display it as external agent-produced content.
+type ExecutionReport struct {
+	OutputTruncated bool      `json:"output_truncated,omitempty"`
+	RunID           string    `json:"run_id"`
+	StepID          string    `json:"step_id"`
+	Agent           string    `json:"agent"`
+	Status          string    `json:"status"`
+	Output          string    `json:"output"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
 type ContinuityPackage struct {
-	ProtocolVersion string             `json:"protocol_version"`
-	SchemaVersion   string             `json:"schema_version"`
-	Capabilities    []string           `json:"capabilities"`
-	TargetAgent     string             `json:"target_agent"`
-	Task            Task               `json:"task"`
-	Events          []Event            `json:"events"`
-	Artifacts       []Artifact         `json:"artifact_manifests"`
-	Branches        []TaskBranch       `json:"branches,omitempty"`
-	Participants    []TaskParticipant  `json:"participants,omitempty"`
-	AgentBindings   []TaskAgentBinding `json:"agent_bindings,omitempty"`
-	Conflicts       []Conflict         `json:"conflicts,omitempty"`
-	Snapshots       []TaskSnapshot     `json:"snapshots,omitempty"`
-	GeneratedAt     time.Time          `json:"generated_at"`
+	ExecutionReports []ExecutionReport  `json:"execution_reports,omitempty"`
+	ProtocolVersion  string             `json:"protocol_version"`
+	SchemaVersion    string             `json:"schema_version"`
+	Capabilities     []string           `json:"capabilities"`
+	TargetAgent      string             `json:"target_agent"`
+	Task             Task               `json:"task"`
+	Events           []Event            `json:"events"`
+	Artifacts        []Artifact         `json:"artifact_manifests"`
+	Branches         []TaskBranch       `json:"branches,omitempty"`
+	Participants     []TaskParticipant  `json:"participants,omitempty"`
+	AgentBindings    []TaskAgentBinding `json:"agent_bindings,omitempty"`
+	Conflicts        []Conflict         `json:"conflicts,omitempty"`
+	Snapshots        []TaskSnapshot     `json:"snapshots,omitempty"`
+	GeneratedAt      time.Time          `json:"generated_at"`
 }

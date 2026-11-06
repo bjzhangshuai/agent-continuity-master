@@ -26,6 +26,8 @@ type BillingLine struct {
 }
 
 type BillingInvoice struct {
+	SourceKind          string        `json:"source_kind,omitempty"`
+	SourceID            string        `json:"source_id,omitempty"`
 	IssuedBy            string        `json:"issued_by,omitempty"`
 	PayerOrganizationID string        `json:"payer_organization_id,omitempty"`
 	PaymentMandateID    string        `json:"payment_mandate_id,omitempty"`

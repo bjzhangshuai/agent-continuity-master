@@ -52,7 +52,7 @@ class CloudContracts(unittest.TestCase):
             with self.assertRaises(ValueError): preflight.validate_production_values(v)
             preflight.merge(v, {'networkPolicy':{'databasePeers':[{'ipBlock':{'cidr':'10.42.0.8/32'}}]},'image':{'repository':'registry.company.test/continuity','tag':'0.3.0'},'ingress':{'host':'continuity.company.test','tls':[{'secretName':'continuity-ingress-tls','hosts':['continuity.company.test']}]}})
             preflight.validate_production_values(v)
-            for override in [{'postgresql':{'enabled':True}}, {'payments':{'demoEnabled':True}}, {'networkPolicy':{'enabled':False}}, {'archive':{'broker':{'install':True}}}, {'backup':{'existingPVC':''}}, {'ingress':{'tls':[]}}, {'autoscaling':{'minReplicas':1}}]:
+            for override in [{'postgresql':{'enabled':True}}, {'payments':{'demoEnabled':True}}, {'workflows':{'demoEnabled':True}}, {'kms':{'config':{'simulation':True}}}, {'networkPolicy':{'enabled':False}}, {'archive':{'broker':{'install':True}}}, {'backup':{'existingPVC':''}}, {'ingress':{'tls':[]}}, {'autoscaling':{'minReplicas':1}}]:
                 bad = preflight.merge(copy.deepcopy(v), override)
                 with self.assertRaises(ValueError): preflight.validate_production_values(bad)
 

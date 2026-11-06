@@ -47,6 +47,15 @@ archive:
       requests: {cpu: 25m, memory: 32Mi}
       limits: {cpu: 250m, memory: 128Mi}
 
+workflows:
+  demoEnabled: false
+  # config.json plus agent/gateway credentials; mounted at /run/workflows.
+  existingSecret: ""
+kms:
+  # config.json plus cloud credential files; mounted at /run/kms.
+  existingSecret: ""
+  config: {}
+
 treasury:
   ownerAccountID: ""
   demoEnabled: false

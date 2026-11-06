@@ -97,9 +97,11 @@ func (s *Store) CreateBill(ctx context.Context, d protocol.BillingDocument) (pro
 			return d, billing.ErrConflict
 		}
 	}
-	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing_documents WHERE ($2<>'' OR account_id=$1) AND organization_id=$2 AND test_mode=$3 AND status<>'void' AND period_start<$5 AND period_end>$4)`, d.Invoice.AccountID, d.Invoice.OrganizationID, d.Invoice.TestMode, d.Invoice.PeriodStart, d.Invoice.PeriodEnd).Scan(&overlap)
-	if err != nil {
-		return d, err
+	if d.Invoice.SourceID == "" {
+		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing_documents WHERE COALESCE(document->'invoice'->>'source_id','')='' AND ($2<>'' OR account_id=$1) AND organization_id=$2 AND test_mode=$3 AND status<>'void' AND period_start<$5 AND period_end>$4)`, d.Invoice.AccountID, d.Invoice.OrganizationID, d.Invoice.TestMode, d.Invoice.PeriodStart, d.Invoice.PeriodEnd).Scan(&overlap)
+		if err != nil {
+			return d, err
+		}
 	}
 	if overlap {
 		return d, billing.ErrOverlap

@@ -92,7 +92,10 @@ func (d *Dispatcher) Deliver(ctx context.Context, delivery protocol.WebhookDeliv
 	if err != nil {
 		return d.fail(ctx, &delivery, now, 0, "webhook endpoint unavailable: "+err.Error())
 	}
-	secret, err := d.cipher.Decrypt(encryptedSecret, endpoint.ID)
+	secret, err := d.cipher.Decrypt(encryptedSecret, endpoint.AccountID+":"+endpoint.ID)
+	if err != nil && len(encryptedSecret) > 0 && encryptedSecret[0] == 1 {
+		secret, err = d.cipher.Decrypt(encryptedSecret, endpoint.ID)
+	}
 	if err != nil {
 		return d.fail(ctx, &delivery, now, 0, err.Error())
 	}
