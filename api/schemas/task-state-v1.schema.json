@@ -8,6 +8,8 @@
     "schema_version": {"const": "1.0"},
     "protocol_version": {"const": "1.0"},
     "capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "target_agent": {"type": "string"},
+    "generated_at": {"type": "string", "format": "date-time"},
     "task": {"$ref": "#/$defs/task"},
     "events": {"type": "array", "items": {"$ref": "#/$defs/event"}},
     "artifact_manifests": {"type": "array", "items": {"$ref": "#/$defs/artifact"}},
@@ -32,7 +34,7 @@
         "objective": {"type": "string", "minLength": 1},
         "status": {"enum": ["active", "paused", "completed", "archived"]},
         "origin_device": {"type": "string"},
-        "head_event_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "head_event_ids": {"type": ["array", "null"], "uniqueItems": true, "items": {"type": "string"}},
         "metadata": {},
         "created_at": {"type": "string", "format": "date-time"},
         "updated_at": {"type": "string", "format": "date-time"}
@@ -56,7 +58,7 @@
         "event_id": {"type": "string"}, "task_id": {"type": "string"}, "branch_id": {"type": "string"},
         "account_id": {"type": "string"}, "participant_id": {"type": "string"}, "agent_id": {"type": "string"},
         "provider_id": {"type": "string"}, "device_id": {"type": "string"}, "session_ref": {"type": "string"},
-        "parent_event_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "parent_event_ids": {"type": ["array", "null"], "uniqueItems": true, "items": {"type": "string"}},
         "logical_time": {"$ref": "#/$defs/hlc"}, "device_sequence": {"type": "integer", "minimum": 1},
         "server_sequence": {"type": "integer", "minimum": 1}, "event_type": {"type": "string", "pattern": "^[a-z0-9_-]+\\.[a-z0-9_.-]+$"},
         "schema_version": {"type": "string"}, "content_type": {"type": "string"},
@@ -86,7 +88,7 @@
       "required": ["task_id", "branch_id", "name", "head_event_ids", "status", "created_by", "created_at"],
       "properties": {
         "task_id": {"type": "string"}, "branch_id": {"type": "string"}, "name": {"type": "string"},
-        "base_event_id": {"type": "string"}, "head_event_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "base_event_id": {"type": "string"}, "head_event_ids": {"type": ["array", "null"], "uniqueItems": true, "items": {"type": "string"}},
         "status": {"enum": ["active", "merged", "archived"]}, "created_by": {"type": "string"},
         "created_at": {"type": "string", "format": "date-time"}, "merged_into": {"type": "string"}, "merged_at": {"type": "string", "format": "date-time"}
       },

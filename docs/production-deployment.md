@@ -1,8 +1,8 @@
 # Production Deployment
 
-The production values are an executable policy profile, not credentials. Replace the example image/tag and endpoints with an immutable signed digest, external PostgreSQL/PITR, versioned/object-locked S3, TLS 1.3 ingress, external-secret ownership, explicit egress CIDRs, audit export and durable metrics/traces.
+The production values are a policy template, not a validated cloud deployment. Use a versioned signed image and verify its digest, external PostgreSQL/PITR, shared RWX/POSIX staging, TLS JetStream, versioned object storage, TLS ingress, external-secret ownership, explicit egress peers, audit export and durable metrics/traces. See [four-cloud delivery](multicloud-deployment.zh-CN.md).
 
-Run at least three API replicas across failure domains with HPA, PDB, anti-affinity/topology spread and zero-unavailable rolling updates. S3 mode keeps resumable chunks in hash-addressed objects, so requests may land on any replica; Pod disk is an expendable cache. PostgreSQL transaction locks remain the authority for Event heads, upload manifests, permissions and webhook delivery.
+Run at least three API replicas across failure domains with HPA, PDB, anti-affinity/topology spread and zero-unavailable rolling updates. Asynchronous archive mode must keep pending data in durable shared staging until confirmed archive receipt; it is not an expendable per-Pod cache. Direct S3 backend is a separate supported mode. PostgreSQL transaction locks remain the authority for Event heads, upload manifests, permissions and durable delivery records.
 
 Release sequence:
 

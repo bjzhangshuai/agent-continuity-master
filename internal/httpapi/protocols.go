@@ -34,13 +34,14 @@ type rpcError struct {
 
 func (s *Server) agentCard(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"name":               "Agent Continuity",
-		"description":        "Secure, causal task handoff and synchronization between AI agents.",
-		"protocolVersion":    "0.3.0",
-		"version":            protocol.ProtocolVersion,
-		"url":                "/v1/a2a",
-		"preferredTransport": "JSONRPC",
-		"capabilities":       map[string]bool{"streaming": false, "pushNotifications": true, "stateTransitionHistory": true},
+		"name":                    "Agent Continuity",
+		"description":             "Legacy Continuity JSON-RPC gateway; custom signed-event parameters, not a conformant A2A server. See /.well-known/agent-continuity.json.",
+		"protocolVersion":         "0.3.0",
+		"version":                 protocol.ProtocolVersion,
+		"url":                     "/v1/a2a",
+		"preferredTransport":      "JSONRPC",
+		"capabilities":            map[string]bool{"streaming": false, "pushNotifications": false, "stateTransitionHistory": false},
+		"continuityCompatibility": map[string]any{"status": "legacy-custom-gateway", "a2aConformant": false},
 		"securitySchemes": map[string]any{
 			"oauth2": map[string]any{"type": "oauth2", "flows": map[string]any{"clientCredentials": map[string]any{"tokenUrl": "/v1/oauth/token", "scopes": map[string]string{"tasks:read": "Read continuity tasks", "tasks:write": "Append signed task events"}}}},
 		},

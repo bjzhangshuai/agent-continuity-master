@@ -307,6 +307,11 @@ func (s *Server) audit(r *http.Request, claims auth.Claims, action, resourceType
 	if err := s.store.CreateWebhookDeliveries(r.Context(), claims.AccountID, action, payload, value.CreatedAt); err != nil {
 		s.logger.Error("enqueue webhook deliveries", "error", err, "action", action, "resource_id", resourceID)
 	}
+	// Event consumption is committed atomically by Store.AppendEvent for every
+	// transport. HTTP audit must never create a second, randomly keyed charge.
+	if action == "event.appended" {
+		return
+	}
 	usageID, _ := protocol.NewID("usage")
 	usage := protocol.UsageRecord{ID: usageID, AccountID: claims.AccountID, Metric: "api.mutation", Quantity: 1, Unit: "operation", ResourceID: resourceID, IdempotencyKey: value.ID, Metadata: mustJSON(map[string]string{"action": action, "resource_type": resourceType}), RecordedAt: value.CreatedAt}
 	taskID := r.PathValue("taskID")

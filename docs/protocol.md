@@ -1,6 +1,6 @@
 # Protocol Overview
 
-Protocol `1.0` is a transport-neutral contract comprising Universal Task State JSON Schema/Protobuf, signed Event and sync envelopes, causal reconciliation, Artifact manifest/blob/chunk separation, E2EE key envelopes, collaboration identity and Adapter resume semantics. REST/OpenAPI, Connect, MCP and A2A expose the same Task/permission/provenance model.
+Protocol `1.0` is a project-owned transport-neutral contract comprising Universal Task State JSON Schema/Protobuf, signed Event and sync envelopes, causal reconciliation, Artifact separation, E2EE keys, collaboration and Adapter resume semantics. REST/Connect, an MCP tool subset and a legacy custom JSON-RPC gateway share the Task/permission model. This does not establish full current MCP/A2A compatibility. See [Profile 1 and conformance boundaries](protocol-profile-v1.md).
 
 Clients negotiate versions/capabilities, preserve namespaced extensions, apply Events idempotently, stage pulls durably, verify producer signatures/digests and repair missed realtime notifications with cursor pull. Task/Artifact IDs, Event causality, branch/merge provenance, key versions and ACLs cannot be reinterpreted by a transport Adapter.
 

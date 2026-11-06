@@ -1,8 +1,14 @@
 # Roadmap and Delivery Status
 
-All software-controlled P0, P1 and P2 capabilities named by the master specification are implemented in this repository and gated by the requirement matrix. This includes the causal/offline core and three demos, DAG/conflict/snapshot UI, presence and collaboration, Organizations/Teams/RBAC/ABAC, advanced E2EE key sharing, metering, agent/capability/task marketplace contracts, Agent-to-Agent transaction ledger, enterprise identity/private-deployment controls and direct P2P Artifact transfer.
+The causal/offline core, collaboration data model, adapters/SDKs, local archival, billing and simulated payment/refund journeys are implemented. This is not completion of every P0/P1/P2 commercial requirement. The [2026-11-07 review](product-architecture-review-2026-11-07.zh-CN.md) replaces the previous all-complete claim.
 
-The next engineering work is evolution, not deferred core functionality:
+Remaining engineering work, ordered by release risk:
+
+- implement/test current A2A and MCP wire contracts using independent clients; the existing legacy A2A gateway is custom;
+- connect marketplace orders to verified collection/refund/seller settlement, or keep paid marketplace operation disabled;
+- add real tax invoicing, cloud KMS/workload identity, and transactional audit/non-event accounting where promised;
+- measure client-confirmed successful continuation and tenant unit economics rather than demo metadata;
+- add an explicit execution/lease/budget layer if autonomous multi-agent orchestration is a product promise;
 
 - increase Adapter coverage only when vendors expose stable supported APIs;
 - calibrate SLOs using production-like load and partition Event storage when measurements require it;

@@ -1,0 +1,34 @@
+# Overlay production/values.yaml, then a private site-values.yaml.
+# Requires TKE, CFS CSI (POSIX/NFS), TencentDB PostgreSQL, COS, TLS JetStream.
+# Placeholders deliberately fail --production preflight until configured.
+image:
+  repository: registry.example.invalid/agent-continuity
+  tag: REPLACE_RELEASE_TAG
+config:
+  dataResidency: ap-guangzhou
+artifactStorage:
+  backend: local
+  accessMode: ReadWriteMany
+  existingClaim: continuity-tencentcloud-staging-rwx
+archive:
+  existingSecret: agent-continuity-archive
+  broker:
+    install: false
+    existingSecret: continuity-nats-auth
+backup:
+  enabled: true
+  existingPVC: continuity-tencentcloud-backup
+ingress:
+  enabled: true
+  host: continuity.example.invalid
+  tls:
+    - secretName: continuity-ingress-tls
+      hosts: [continuity.example.invalid]
+payments:
+  demoEnabled: false
+  publicBaseURL: https://continuity.example.invalid
+treasury:
+  demoEnabled: false
+networkPolicy:
+  # Fill exact private PostgreSQL IP ranges in site-values.yaml.
+  databasePeers: []

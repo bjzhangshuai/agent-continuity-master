@@ -28,12 +28,41 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
+    env:
+      DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+      DEPLOY_IMAGE_TAG: ${{ inputs.image_tag }}
+      DEPLOY_IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: {go-version-file: go.mod, cache: true}
       - uses: azure/setup-helm@v4
       - uses: azure/setup-kubectl@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Prepare site-specific values
+        env:
+          DEPLOY_VALUES_YAML: ${{ vars.DEPLOY_VALUES_YAML }}
+        run: |
+          pip install PyYAML==6.0.2
+          python - <<'PY'
+          import os, pathlib, re, yaml
+          if os.environ['DEPLOY_ENVIRONMENT'] not in ('staging', 'production'):
+              raise SystemExit('Unsupported deployment environment')
+          tag = os.environ['DEPLOY_IMAGE_TAG']
+          if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}', tag) or tag in ('dev', 'latest'):
+              raise SystemExit('A versioned release image tag is required')
+          raw = os.environ.get('DEPLOY_VALUES_YAML', '')
+          if not raw.strip() or not isinstance(yaml.safe_load(raw), dict):
+              raise SystemExit('Configure protected environment variable DEPLOY_VALUES_YAML with site endpoints, Secret names, PVCs and network peers')
+          folder = pathlib.Path(os.environ['RUNNER_TEMP'])
+          site, image = folder/'site-values.yaml', folder/'image-values.yaml'
+          site.write_text(raw)
+          image.write_text(yaml.safe_dump({'image': {'repository': os.environ['DEPLOY_IMAGE_REPOSITORY'].lower(), 'tag': tag}}))
+          site.chmod(0o600)
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write(f'CONTINUITY_SITE_VALUES={site}\nCONTINUITY_IMAGE_VALUES={image}\n')
+          PY
       - name: Configure explicit cluster context
         env:
           KUBE_CONFIG_B64: ${{ secrets.KUBE_CONFIG_B64 }}
@@ -47,12 +76,14 @@ jobs:
           kubectl --context "$KUBE_CONTEXT" cluster-info
       - name: Render release contract
         run: |
-          helm lint deploy/helm/agent-continuity -f "deploy/environments/${{ inputs.environment }}/values.yaml"
-          helm template agent-continuity deploy/helm/agent-continuity -f "deploy/environments/${{ inputs.environment }}/values.yaml" --set image.repository="ghcr.io/${{ github.repository }}" --set image.tag="${{ inputs.image_tag }}" >/dev/null
+          helm lint deploy/helm/agent-continuity -f "deploy/environments/$DEPLOY_ENVIRONMENT/values.yaml" -f "$CONTINUITY_SITE_VALUES" -f "$CONTINUITY_IMAGE_VALUES"
+          flags=()
+          if [ "$DEPLOY_ENVIRONMENT" = production ]; then flags+=(--production); fi
+          python scripts/preflight-helm.py --context "$CONTINUITY_KUBE_CONTEXT" --namespace "agent-continuity-$DEPLOY_ENVIRONMENT" -f "deploy/environments/$DEPLOY_ENVIRONMENT/values.yaml" -f "$CONTINUITY_SITE_VALUES" -f "$CONTINUITY_IMAGE_VALUES" "${flags[@]}"
       - name: Deploy isolated canary
         if: ${{ inputs.canary }}
         run: |
-          helm upgrade --install agent-continuity-canary deploy/helm/agent-continuity --kube-context "$CONTINUITY_KUBE_CONTEXT" --namespace "agent-continuity-${{ inputs.environment }}" --create-namespace --values "deploy/environments/${{ inputs.environment }}/values.yaml" --set image.repository="ghcr.io/${{ github.repository }}" --set image.tag="${{ inputs.image_tag }}" --set replicaCount=1 --set autoscaling.enabled=false --set podDisruptionBudget.enabled=false --rollback-on-failure --wait --timeout 10m
+          helm upgrade --install agent-continuity-canary deploy/helm/agent-continuity --kube-context "$CONTINUITY_KUBE_CONTEXT" --namespace "agent-continuity-$DEPLOY_ENVIRONMENT" --values "deploy/environments/$DEPLOY_ENVIRONMENT/values.yaml" -f "$CONTINUITY_SITE_VALUES" -f "$CONTINUITY_IMAGE_VALUES" --set replicaCount=1 --set autoscaling.enabled=false --set podDisruptionBudget.enabled=false --set ingress.enabled=false --set backup.enabled=false --rollback-on-failure --wait --timeout 10m
       - name: Canary smoke
         if: ${{ inputs.canary }}
         env:
@@ -62,7 +93,7 @@ jobs:
         run: ./scripts/smoke-k8s-context.sh
       - name: Rolling promotion
         run: |
-          helm upgrade --install agent-continuity deploy/helm/agent-continuity --kube-context "$CONTINUITY_KUBE_CONTEXT" --namespace "agent-continuity-${{ inputs.environment }}" --create-namespace --values "deploy/environments/${{ inputs.environment }}/values.yaml" --set image.repository="ghcr.io/${{ github.repository }}" --set image.tag="${{ inputs.image_tag }}" --rollback-on-failure --wait --timeout 10m
+          helm upgrade --install agent-continuity deploy/helm/agent-continuity --kube-context "$CONTINUITY_KUBE_CONTEXT" --namespace "agent-continuity-$DEPLOY_ENVIRONMENT" --values "deploy/environments/$DEPLOY_ENVIRONMENT/values.yaml" -f "$CONTINUITY_SITE_VALUES" -f "$CONTINUITY_IMAGE_VALUES" --rollback-on-failure --wait --timeout 10m
       - name: Post-rollout smoke
         env:
           CONTINUITY_ALLOW_NONLOCAL_K8S: "true"

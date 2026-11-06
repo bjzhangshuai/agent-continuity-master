@@ -33,6 +33,10 @@ func TestFullContinuityJourney(t *testing.T) {
 	if baseURL == "" || bootstrap == "" {
 		t.Skip("CONTINUITY_E2E_URL and CONTINUITY_E2E_BOOTSTRAP_TOKEN are required")
 	}
+	discovery := request(t, http.MethodGet, baseURL+"/.well-known/agent-continuity.json", "", nil, nil, http.StatusOK)
+	if !bytes.Contains(discovery, []byte(`"profile": "agent-continuity/1"`)) {
+		t.Fatal("protocol discovery unavailable")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	owner, ownerToken := createAccount(t, baseURL, bootstrap, "owner-"+time.Now().Format("150405"))
@@ -98,6 +102,22 @@ func TestFullContinuityJourney(t *testing.T) {
 	duplicate, err := api.AppendEvent(ctx, parent)
 	if err != nil || !duplicate.Duplicate {
 		t.Fatalf("at-least-once duplicate was not idempotent: %+v %v", duplicate, err)
+	}
+	usage, err := api.ListUsage(ctx, time.Now().Add(-time.Hour), time.Now().Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	charges := map[string]int64{}
+	for _, item := range usage {
+		if item.ResourceID == first.EventID || item.ResourceID == parent.EventID || item.ResourceID == child.EventID {
+			if !bytes.Contains(item.Metadata, []byte(`"metering_contract":"accepted-event/1"`)) {
+				t.Fatalf("non-transactional event meter: %+v", item)
+			}
+			charges[item.ResourceID] += item.Quantity
+		}
+	}
+	if len(charges) != 3 || charges[first.EventID] != 1 || charges[parent.EventID] != 1 || charges[child.EventID] != 1 {
+		t.Fatalf("duplicate/lost event metering: %+v", charges)
 	}
 	taskKey, err := e2ee.GenerateTaskKey()
 	if err != nil {

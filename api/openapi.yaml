@@ -555,8 +555,17 @@ paths:
     post: {responses: {'200': {description: Missing events, heads, conflicts, and reconciliation cursor}}}
   /v1/mcp:
     post: {description: MCP 2025-06-18 JSON-RPC endpoint, responses: {'200': {description: MCP response}}}
+  /.well-known/agent-continuity.json:
+    get: {security: [], responses: {'200': {description: Versioned project protocol profile and explicit compatibility boundaries}}}
+  /v1/protocol/openapi.yaml:
+    get: {security: [], responses: {'200': {description: This OpenAPI contract}}}
+  /v1/protocol/schemas/{name}:
+    get:
+      security: []
+      parameters: [{in: path, name: name, required: true, schema: {type: string}}]
+      responses: {'200': {description: JSON Schema 2020-12 contract}, '404': {description: Unknown schema}}
   /v1/a2a:
-    post: {description: A2A JSON-RPC gateway, responses: {'200': {description: A2A task or message result}}}
+    post: {description: Legacy custom JSON-RPC gateway with signed event parameters; not A2A 1.0 conformant, responses: {'200': {description: Legacy task or append result}}}
   /.well-known/agent-card.json:
     get: {security: [], responses: {'200': {description: A2A Agent Card}}}
   /agentcontinuity.v1.ContinuityService/GetTask:

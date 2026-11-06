@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/agent-continuity/agent-continuity-master/internal/archive"
+	"github.com/agent-continuity/agent-continuity-master/internal/metering"
 	"github.com/agent-continuity/agent-continuity-master/internal/storage"
 	"github.com/agent-continuity/agent-continuity-master/migrations"
 	"github.com/agent-continuity/agent-continuity-master/pkg/protocol"
@@ -248,12 +249,11 @@ func (s *Store) AppendEvent(ctx context.Context, value protocol.Event) (protocol
 		return protocol.AppendResult{}, err
 	}
 	defer tx.Rollback(ctx)
-	var taskAccount string
+	var taskAccount, taskOrganization string
 	var headsRaw []byte
-	if err = tx.QueryRow(ctx, `SELECT account_id,head_event_ids FROM tasks WHERE task_id=$1 FOR UPDATE`, value.TaskID).Scan(&taskAccount, &headsRaw); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT account_id,COALESCE(organization_id,''),head_event_ids FROM tasks WHERE task_id=$1 FOR UPDATE`, value.TaskID).Scan(&taskAccount, &taskOrganization, &headsRaw); err != nil {
 		return protocol.AppendResult{}, mapError(err)
 	}
-	_ = taskAccount // ownership is distinct from a collaborator's event account.
 	var branchHeadsRaw []byte
 	var branchStatus string
 	if err = tx.QueryRow(ctx, `SELECT head_event_ids,status FROM task_branches WHERE task_id=$1 AND branch_id=$2 FOR UPDATE`, value.TaskID, value.BranchID).Scan(&branchHeadsRaw, &branchStatus); err != nil {
@@ -319,6 +319,10 @@ func (s *Store) AppendEvent(ctx context.Context, value protocol.Event) (protocol
 		return protocol.AppendResult{}, mapError(err)
 	}
 	value.ReceivedAtServer = received
+	usage := metering.AcceptedEvent(value, taskAccount, taskOrganization)
+	if _, err = tx.Exec(ctx, `INSERT INTO usage_records(usage_id,account_id,organization_id,metric,quantity,unit,resource_id,idempotency_key,metadata,recorded_at) VALUES($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8,$9,$10)`, usage.ID, usage.AccountID, usage.OrganizationID, usage.Metric, usage.Quantity, usage.Unit, usage.ResourceID, usage.IdempotencyKey, []byte(usage.Metadata), usage.RecordedAt); err != nil {
+		return protocol.AppendResult{}, err
+	}
 	heads = updateHeads(heads, value.ParentEventIDs, value.EventID)
 	branchHeads = updateHeads(branchHeads, value.ParentEventIDs, value.EventID)
 	var hasKnownChild bool
@@ -359,6 +363,9 @@ func findDuplicate(ctx context.Context, tx pgx.Tx, value protocol.Event) (protoc
 	event, err := scanEvent(row, true)
 	if errors.Is(err, storage.ErrNotFound) {
 		return protocol.Event{}, false, nil
+	}
+	if err == nil && !storage.SameEventOperation(event, value) {
+		return protocol.Event{}, false, storage.ErrSequenceReplay
 	}
 	return event, err == nil, err
 }

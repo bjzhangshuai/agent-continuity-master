@@ -1,6 +1,6 @@
 # Deployment
 
-Four executable modes are supported: dependency-free memory development, isolated PostgreSQL/MinIO/observability Compose integration, Kubernetes dev/staging, and a production Helm profile using external PostgreSQL and S3.
+Four modes exist: memory development, isolated Compose integration, Kubernetes dev/staging, and production Helm profiles. Current async-archive profiles use external PostgreSQL, shared RWX/POSIX staging, TLS JetStream and a selectable cloud archive provider. See [cloud delivery](multicloud-deployment.zh-CN.md); templates passing render are not real-cloud acceptance.
 
 ```mermaid
 flowchart TB
@@ -22,6 +22,6 @@ flowchart TB
 
 The chart renders Deployment, Service, optional Ingress, ConfigMap, existing Secret references, ServiceAccount/RBAC, HPA, PDB, NetworkPolicy, ServiceMonitor/PrometheusRule, migration Job, optional backup CronJob and development PostgreSQL. It includes startup/readiness/liveness probes, graceful termination, rolling update with zero unavailable, anti-affinity/topology options and explicit external egress CIDRs.
 
-Local Artifact mode uses a retained RWO PVC and the chart rejects local storage with multiple replicas or HPA. Staging and production profiles use S3; resumable chunks are immutable hash-addressed objects and each Pod uses `emptyDir` only as expendable staging/cache, so requests may route to any replica. Production values disable in-chart PostgreSQL, use three replicas/HPA/PDB and require the example S3/TLS/secrets/egress values to be replaced with real endpoints. The migration Job renders for both in-chart and external PostgreSQL.
+Single-node local mode uses retained RWO PVCs. Multiple API/worker replicas in asynchronous-archive mode require the shared RWX claim and cross-node POSIX locks; unarchived bytes must survive Pod loss. Direct S3 backend is an alternate mode, not the current production values default. Production disables in-chart PostgreSQL, uses three replicas/HPA/PDB and needs site-specific TLS/secrets/egress/backup values. Migration works with internal or external PostgreSQL.
 
 Rancher Desktop scripts validate an explicit loopback `rancher-desktop` context and node identity, never switch the current context, preserve the existing Secret/PVC, perform rollback-on-failure and execute the release E2E through a local port-forward. The local image ID is included in the Pod template so rebuilding the same `:dev` tag still creates a new ReplicaSet. Generic staging/production deployment requires explicit operator context and approval; the local safety script intentionally refuses it.

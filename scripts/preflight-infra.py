@@ -38,6 +38,12 @@ def main():
     nodes = json.loads(command(['kubectl','--context',a.context,'get','nodes','-o','json']))['items']
     healthy = [n for n in nodes if not n.get('spec',{}).get('unschedulable') and any(c['type']=='Ready' and c['status']=='True' for c in n['status']['conditions']) and not any(c['type'] in ('MemoryPressure','DiskPressure','PIDPressure') and c['status']=='True' for c in n['status']['conditions'])]
     if not healthy: raise ValueError('No schedulable Ready node without pressure')
+    if a.context == 'rancher-desktop':
+        capacity_spec = spec_from_file_location('capacity', ROOT/'scripts/check-local-capacity.py')
+        capacity = module_from_spec(capacity_spec)
+        capacity_spec.loader.exec_module(capacity)
+        pods = json.loads(command(['kubectl','--context',a.context,'get','pods','-A','-o','json']))['items']
+        capacity.check(nodes, pods)
     if v['nats']['enabled'] and len(healthy)<int(v['nats']['config']['cluster']['replicas']):
         raise ValueError('NATS anti-affinity requires one healthy node per replica; use the dev infra profile locally')
     for name, crd in [('keda','scaledobjects.keda.sh'),('monitoring','prometheuses.monitoring.coreos.com')]:

@@ -5,7 +5,7 @@ The server is a modular monolith because Event acceptance, permission evaluation
 ```mermaid
 flowchart LR
   AD[Codex / Generic Adapter] --> LD[Local Daemon]
-  CLI[CLI / SDK / Web] --> API[REST + Connect + MCP + A2A]
+  CLI[CLI / SDK / Web] --> API[REST / Connect / MCP subset / legacy RPC]
   LD --> API
   API --> IAM[Auth / SSO / SCIM / Policy]
   API --> CORE[Task / Event / DAG / Reconcile]
@@ -17,6 +17,10 @@ flowchart LR
   COL --> PG
   DEV --> PG
   ART --> OBJ[(Local CAS or S3)]
+  ART --> OUTBOX[PostgreSQL transaction Outbox]
+  OUTBOX --> JS[NATS JetStream]
+  JS --> W[Independent archive workers]
+  W --> CLOUD[(S3 / OSS / COS / Azure Blob / MinIO)]
 ```
 
 ```mermaid
@@ -38,8 +42,8 @@ flowchart TB
   S --> H
 ```
 
-PostgreSQL is the authority for identity, permissions, metadata, Events, cursors, conflicts and durable webhook delivery state. The database Event Log is also the reconstructable durable source behind notifications, so an external event bus is optional rather than a correctness dependency. Artifact bytes remain outside relational rows.
+PostgreSQL is the authority for identity, permissions, metadata, Events, cursors, conflicts and durable webhook delivery state. New Event consumption and the Event commit in one transaction, independently of HTTP/MCP/sync transport. HTTP audit/webhook enqueue and other mutation meters still have post-commit failure boundaries. Realtime notifications are repaired by cursor pull. Enabled asynchronous archival requires JetStream; PostgreSQL is its transactional Outbox, not the message broker. Artifact bytes remain outside relational rows.
 
-S3 mode stores resumable chunks as immutable hash-addressed temporary objects, allowing any API replica to continue or assemble an upload. Per-pod disk is only an expendable cache; local mode uses a retained PVC. Realtime is never authoritative. E2EE payloads and Artifact ciphertext are opaque to the server.
+Direct S3 mode supports replica-safe resumable chunks. Current asynchronous-archive production values instead use shared RWX/POSIX staging between API and workers; until confirmed archive receipt, this staging is durable pending data, not disposable cache. Lifecycle may evict archived cached bytes only under retention/locking rules. E2EE ciphertext remains opaque. Outbox + JetStream + idempotent workers gives eventual consistency, not cross-cloud XA.
 
 Production uses external PostgreSQL/PITR, versioned object storage, TLS ingress, external secrets, three or more stateless API replicas, HPA/PDB/topology controls, explicit egress policy and managed telemetry. The in-chart PostgreSQL exists only for local/dev acceptance.

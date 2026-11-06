@@ -7,6 +7,7 @@ export PATH
 repository_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 compose_file="$repository_dir/deploy/compose/docker-compose.yaml"
 project_name="agent-continuity-e2e-$$"
+docker_context=${CONTINUITY_DOCKER_CONTEXT:-rancher-desktop}
 postgres_password=$(openssl rand -hex 24)
 jwt_secret=$(openssl rand -hex 32)
 bootstrap_token=$(openssl rand -hex 32)
@@ -17,19 +18,19 @@ port=${CONTINUITY_E2E_PORT:-18080}
 
 cleanup() {
   POSTGRES_PASSWORD="$postgres_password" CONTINUITY_JWT_SECRET="$jwt_secret" CONTINUITY_BOOTSTRAP_TOKEN="$bootstrap_token" CONTINUITY_MASTER_KEY="$master_key" MINIO_ROOT_USER="$minio_root_user" MINIO_ROOT_PASSWORD="$minio_root_password" CONTINUITY_PORT="$port" \
-    docker --context rancher-desktop compose -p "$project_name" -f "$compose_file" down --volumes --remove-orphans >/dev/null 2>&1 || true
+    docker --context "$docker_context" compose -p "$project_name" -f "$compose_file" down --volumes --remove-orphans >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
 POSTGRES_PASSWORD="$postgres_password" CONTINUITY_JWT_SECRET="$jwt_secret" CONTINUITY_BOOTSTRAP_TOKEN="$bootstrap_token" CONTINUITY_MASTER_KEY="$master_key" MINIO_ROOT_USER="$minio_root_user" MINIO_ROOT_PASSWORD="$minio_root_password" CONTINUITY_PORT="$port" \
-  docker --context rancher-desktop compose -p "$project_name" -f "$compose_file" up --build --detach --wait postgres minio server
+  docker --context "$docker_context" compose -p "$project_name" -f "$compose_file" up --build --detach --wait postgres minio server
 
 attempt=0
 until curl --fail --silent "http://127.0.0.1:$port/v1/health/ready" >/dev/null; do
   attempt=$((attempt+1))
   if [ "$attempt" -ge 40 ]; then
     POSTGRES_PASSWORD="$postgres_password" CONTINUITY_JWT_SECRET="$jwt_secret" CONTINUITY_BOOTSTRAP_TOKEN="$bootstrap_token" CONTINUITY_MASTER_KEY="$master_key" MINIO_ROOT_USER="$minio_root_user" MINIO_ROOT_PASSWORD="$minio_root_password" CONTINUITY_PORT="$port" \
-      docker --context rancher-desktop compose -p "$project_name" -f "$compose_file" ps >&2
+      docker --context "$docker_context" compose -p "$project_name" -f "$compose_file" ps >&2
     exit 1
   fi
   sleep 0.25

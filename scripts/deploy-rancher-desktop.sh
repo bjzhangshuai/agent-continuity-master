@@ -54,6 +54,8 @@ if ! kubectl --context "$context" wait --for=condition=Ready node --all --timeou
   exit 1
 fi
 
+python3 "$repository_dir/scripts/check-local-capacity.py" --context "$context"
+
 echo "Building a local image with Rancher Desktop's isolated Docker context..."
 docker --context rancher-desktop build --tag agent-continuity:dev "$repository_dir"
 image_id=$(docker --context rancher-desktop image inspect agent-continuity:dev --format '{{.Id}}')

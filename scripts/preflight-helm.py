@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,14 +19,42 @@ def merge(a, b):
             a[key] = value
     return a
 
+def validate_production_values(v):
+    """Pure checks shared by offline CI and read-only live preflight."""
+    if v['postgresql']['enabled']:
+        raise ValueError('Production requires external PostgreSQL with PITR')
+    if not v['networkPolicy']['enabled'] or not v['networkPolicy']['databasePeers']:
+        raise ValueError('Production requires explicit database peers and NetworkPolicy')
+    if v['image']['tag'] in ('dev', 'latest', '', 'REPLACE_RELEASE_TAG') or '.invalid' in v['image']['repository']:
+        raise ValueError('Replace placeholder image with a versioned release; verify its signature/digest')
+    replicas = v['autoscaling']['minReplicas'] if v['autoscaling']['enabled'] else v['replicaCount']
+    if replicas < 3:
+        raise ValueError('Production profile requires at least 3 API replicas')
+    if v['archive']['enabled'] and (v['archive']['broker']['install'] or not v['networkPolicy']['brokerPeers']):
+        raise ValueError('Production requires external HA JetStream and explicit broker peers')
+    if not v['backup']['enabled'] or not v['backup']['existingPVC']:
+        raise ValueError('Production requires a dedicated backup PVC and restore drill')
+    ingress = v['ingress']
+    if ingress['enabled']:
+        host = ingress['host']
+        if not host or host.endswith(('.invalid', '.local')) or 'example.' in host:
+            raise ValueError('Replace placeholder ingress host')
+        if not any(host in entry.get('hosts', []) and entry.get('secretName') for entry in ingress['tls']):
+            raise ValueError('Ingress requires a TLS Secret covering its host')
+    if v['payments']['demoEnabled'] or v['treasury']['demoEnabled']:
+        raise ValueError('Production must disable demo payments and treasury')
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--context', required=True)
+    p.add_argument('--context')
     p.add_argument('--namespace', required=True)
     p.add_argument('--release', default='agent-continuity')
     p.add_argument('-f', '--values', action='append', required=True)
     p.add_argument('--production', action='store_true')
+    p.add_argument('--offline', action='store_true', help='Only render and validate values; never access a cluster')
     args = p.parse_args()
+    if not args.offline and not args.context:
+        p.error('--context is required unless --offline is used')
     chart = ROOT / 'deploy/helm/agent-continuity'
     v = yaml.safe_load((chart / 'values.yaml').read_text())
     values_args = []
@@ -42,6 +70,10 @@ def main():
     def get(kind, name):
         return json.loads(command(['kubectl', '--context', args.context, '-n', args.namespace, 'get', kind, name, '-o', 'json']))
     docs = list(yaml.safe_load_all(command(['helm', 'template', args.release, str(chart), '-n', args.namespace, *values_args])))
+    if args.production: validate_production_values(v)
+    if args.offline:
+        print('PASS: offline rendering and selected values policy only. Secrets/PVCs/CRDs/network/clouds NOT verified.')
+        return
     generated = {(d['kind'], d['metadata']['name']): d for d in docs if d}
     secrets = {}
     def secret(name, keys=()):
@@ -103,7 +135,7 @@ def main():
     if args.production:
         if v['image']['tag'] in ('dev', 'latest', ''): raise ValueError('Production requires an immutable release image tag')
         db = urlparse(base64.b64decode(core['database-url']).decode())
-        if 'sslmode=verify-full' not in db.query: raise ValueError('Production external PostgreSQL must use sslmode=verify-full')
+        if parse_qs(db.query).get('sslmode') != ['verify-full']: raise ValueError('Production external PostgreSQL must use sslmode=verify-full')
         if not v['backup']['enabled']: raise ValueError('Production backup.enabled must be true with a dedicated existingPVC')
     print('PASS: Helm rendered; referenced Secrets/keys, PVCs, CRDs and egress prerequisites checked. No cluster writes.')
     print('Still required: actual network/TLS connectivity, shared POSIX file locking, cloud probe and backup restore drill.')

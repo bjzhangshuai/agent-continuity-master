@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/agent-continuity/agent-continuity-master/internal/auth"
+	"github.com/agent-continuity/agent-continuity-master/internal/metering"
 	"github.com/agent-continuity/agent-continuity-master/internal/reconcile"
 	"github.com/agent-continuity/agent-continuity-master/internal/storage"
 	pgstore "github.com/agent-continuity/agent-continuity-master/internal/storage/postgres"
@@ -27,7 +29,8 @@ func TestPostgresEventTransaction(t *testing.T) {
 	if databaseURL == "" {
 		t.Skip("CONTINUITY_TEST_DATABASE_URL is not set")
 	}
-	if !strings.Contains(databaseURL, "continuity_test") && !strings.Contains(databaseURL, "continuity?sslmode=disable") {
+	dbURL, parseErr := url.Parse(databaseURL)
+	if parseErr != nil || !(strings.HasPrefix(dbURL.Path, "/continuity_test_") || strings.HasPrefix(dbURL.Path, "/continuity_archive_test_") || dbURL.Path == "/continuity_test") {
 		t.Fatal("refusing integration test against an unrecognized database")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -103,6 +106,52 @@ func TestPostgresEventTransaction(t *testing.T) {
 	}
 	if first.Duplicate || !second.Duplicate || first.Event.ServerSequence != second.Event.ServerSequence {
 		t.Fatalf("idempotency failed: first=%+v second=%+v", first, second)
+	}
+	otherTask := task
+	otherTask.ID, otherTask.AccountID = "other_"+suffix, guest.ID
+	if err := store.CreateTask(ctx, otherTask); err != nil {
+		t.Fatal(err)
+	}
+	otherDevice := device
+	otherDevice.ID, otherDevice.AccountID = "otherdevice_"+suffix, guest.ID
+	if err := store.RegisterDevice(ctx, otherDevice); err != nil {
+		t.Fatal(err)
+	}
+	crossTenant := value
+	crossTenant.TaskID, crossTenant.AccountID, crossTenant.DeviceID = otherTask.ID, guest.ID, otherDevice.ID
+	if _, err := store.AppendEvent(ctx, crossTenant); !errors.Is(err, storage.ErrSequenceReplay) {
+		t.Fatalf("cross-tenant event collision was not rejected: %v", err)
+	}
+	// A ledger write failure must roll back the event and its cursor/head changes.
+	usage, err := store.ListUsage(ctx, account.ID, time.Time{}, time.Now().Add(time.Minute), 100)
+	if err != nil || len(usage) != 1 || usage[0].Quantity != 1 || usage[0].ResourceID != value.EventID {
+		t.Fatalf("transactional event meter: %+v %v", usage, err)
+	}
+	failing := value
+	failing.EventID, failing.IdempotencyKey, failing.DeviceSequence = "atomic_"+suffix, "atomic_"+suffix, 2
+	failing.ReceivedAtServer = time.Now().UTC()
+	collision := metering.AcceptedEvent(failing, account.ID, "")
+	if err := store.RecordUsage(ctx, collision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendEvent(ctx, failing); err == nil {
+		t.Fatal("ledger failure did not abort event acceptance")
+	}
+	remaining, err := store.ListEvents(ctx, task.ID, 0, 100, true)
+	if err != nil || len(remaining) != 1 || remaining[0].EventID != value.EventID {
+		t.Fatalf("event leaked from failed transaction: %+v %v", remaining, err)
+	}
+	if current, err := store.GetTask(ctx, task.ID); err != nil || len(current.HeadEventIDs) != 1 || current.HeadEventIDs[0] != value.EventID {
+		t.Fatalf("task heads changed after rollback: %+v %v", current, err)
+	}
+	cleanup, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = cleanup.Exec(ctx, `DELETE FROM usage_records WHERE usage_id=$1 AND account_id=$2`, collision.ID, account.ID)
+	cleanup.Close(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	refresh, _ := auth.NewOpaqueToken("rft")
@@ -235,9 +284,11 @@ func TestPostgresEventTransaction(t *testing.T) {
 	}
 	_ = admin.Close(ctx)
 	recovered := false
-	for attempt := 0; attempt < 20; attempt++ {
+	var recoveryErr error
+	for started := time.Now(); time.Since(started) < 5*time.Second; {
 		pingCtx, pingCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		err := store.Ping(pingCtx)
+		recoveryErr = err
 		pingCancel()
 		if err == nil {
 			recovered = true
@@ -246,6 +297,6 @@ func TestPostgresEventTransaction(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !recovered {
-		t.Fatal("PostgreSQL connection pool did not recover after backend termination")
+		t.Fatalf("PostgreSQL connection pool did not recover within 5s after backend termination: %v", recoveryErr)
 	}
 }

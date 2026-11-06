@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/agent-continuity/agent-continuity-master/internal/metering"
 	"github.com/agent-continuity/agent-continuity-master/internal/storage"
 	"github.com/agent-continuity/agent-continuity-master/internal/tenancy"
 	"github.com/agent-continuity/agent-continuity-master/pkg/protocol"
@@ -287,11 +288,17 @@ func (s *Store) AppendEvent(_ context.Context, event protocol.Event) (protocol.A
 		return protocol.AppendResult{}, storage.ErrDeviceRevoked
 	}
 	if existing, ok := s.eventIDs[event.EventID]; ok {
+		if !storage.SameEventOperation(existing, event) {
+			return protocol.AppendResult{}, storage.ErrSequenceReplay
+		}
 		return protocol.AppendResult{Event: cloneEvent(existing), Duplicate: true, TaskHeads: append([]string(nil), task.HeadEventIDs...)}, nil
 	}
 	idemKey := event.TaskID + "\x00" + event.DeviceID + "\x00" + event.IdempotencyKey
 	if eventID, ok := s.idempotency[idemKey]; ok {
 		existing := s.eventIDs[eventID]
+		if !storage.SameEventOperation(existing, event) {
+			return protocol.AppendResult{}, storage.ErrSequenceReplay
+		}
 		return protocol.AppendResult{Event: cloneEvent(existing), Duplicate: true, TaskHeads: append([]string(nil), task.HeadEventIDs...)}, nil
 	}
 	sequenceKey := event.TaskID + "\x00" + event.DeviceID + "\x00" + strconv.FormatUint(event.DeviceSequence, 10)
@@ -315,6 +322,9 @@ func (s *Store) AppendEvent(_ context.Context, event protocol.Event) (protocol.A
 	s.nextSequence++
 	event.ServerSequence = s.nextSequence
 	event.ReceivedAtServer = s.now().UTC()
+	usage := metering.AcceptedEvent(event, task.AccountID, task.OrganizationID)
+	s.usageRecords[usage.ID] = usage
+	s.usageIdempotency[usage.AccountID+"\x00"+usage.Metric+"\x00"+usage.IdempotencyKey] = usage.ID
 	s.events[event.TaskID] = append(s.events[event.TaskID], cloneEvent(event))
 	s.eventIDs[event.EventID] = cloneEvent(event)
 	s.idempotency[idemKey] = event.EventID

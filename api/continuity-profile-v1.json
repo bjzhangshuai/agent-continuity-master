@@ -1,0 +1,36 @@
+{
+  "profile": "agent-continuity/1",
+  "revision": "2026-11-07",
+  "status": "project-contract",
+  "industry_standard": false,
+  "protocol_versions": ["1.0"],
+  "schema_version": "1.0",
+  "discovery": "/.well-known/agent-continuity.json",
+  "openapi": "/v1/protocol/openapi.yaml",
+  "schemas": {
+    "continuity_package": "/v1/protocol/schemas/task-state-v1.schema.json",
+    "usage_record": "/v1/protocol/schemas/usage-record-v1.schema.json",
+    "audit_event": "/v1/protocol/schemas/audit-event-v1.schema.json"
+  },
+  "transports": {
+    "rest": {"endpoint": "/v1", "status": "supported"},
+    "sync": {"endpoint": "/v1/sync/hello", "status": "supported", "capability_negotiation": true},
+    "mcp": {"endpoint": "/v1/mcp", "version": "2025-06-18", "status": "tool-subset", "full_conformance": false},
+    "a2a": {"endpoint": "/v1/a2a", "status": "legacy-custom-gateway", "full_conformance": false, "industry_version": null}
+  },
+  "semantics": {
+    "delivery": "at-least-once",
+    "deduplication": ["event_id", "task_id+device_id+idempotency_key"],
+    "ordering": "causal DAG; server_sequence is a pull cursor, not causal order",
+    "signing": "AC-EVENT-1 Ed25519 portable signing; legacy Go encoding accepted",
+    "resume": "portable rehydrate; native resume requires adapter detection",
+    "billing": "accepted-event/1: event and api.mutation usage commit atomically; duplicates add zero; task owner or organization is payer",
+    "audit": "signed events preserve device provenance; HTTP audit/webhook enqueue are currently best-effort",
+    "distributed_transactions": "PostgreSQL transactional outbox + JetStream at-least-once + idempotent worker; no cross-cloud XA",
+    "currency": "integer minor units; CNY/USD/EUR; provider fees and model token bills are separate",
+    "extensions": "preserve unknown namespaced extensions; negotiate capability intersection before use"
+  },
+  "billing_api": {"invoices": "/v1/billing/invoices", "usage": "/v1/usage", "receipt_type": "non-tax", "marketplace_settlement": "not-connected"},
+  "sdk_languages": ["go", "python", "typescript", "swift", "kotlin", "dotnet"],
+  "limits": {"automatic_closed_app_installation": false, "native_runtime_migration": false, "model_execution_orchestration": false}
+}

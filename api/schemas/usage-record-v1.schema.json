@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agent-continuity:usage-record:1",
+  "title": "Server-owned UsageRecord v1",
+  "type": "object",
+  "required": ["usage_id", "account_id", "metric", "quantity", "unit", "idempotency_key", "recorded_at"],
+  "properties": {
+    "usage_id": {"type": "string", "minLength": 1},
+    "account_id": {"type": "string", "minLength": 1},
+    "organization_id": {"type": "string"},
+    "metric": {"type": "string", "minLength": 1},
+    "quantity": {"type": "integer", "minimum": 0},
+    "unit": {"type": "string", "minLength": 1},
+    "resource_id": {"type": "string"},
+    "idempotency_key": {"type": "string", "minLength": 1},
+    "metadata": {},
+    "recorded_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": true
+}

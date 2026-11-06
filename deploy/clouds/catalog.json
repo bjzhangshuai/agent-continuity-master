@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "validation": "offline-contracts-only",
+  "clouds": [
+    {
+      "id": "aws",
+      "kubernetes": "EKS",
+      "postgresql": "RDS PostgreSQL",
+      "shared_staging": "EFS CSI (POSIX/NFS)",
+      "object_storage": "S3",
+      "archive_provider": "aws",
+      "values": "deploy/clouds/aws/values.yaml"
+    },
+    {
+      "id": "alicloud",
+      "kubernetes": "ACK",
+      "postgresql": "RDS PostgreSQL",
+      "shared_staging": "NAS CSI (POSIX/NFS)",
+      "object_storage": "OSS",
+      "archive_provider": "alicloud",
+      "values": "deploy/clouds/alicloud/values.yaml"
+    },
+    {
+      "id": "tencentcloud",
+      "kubernetes": "TKE",
+      "postgresql": "TencentDB PostgreSQL",
+      "shared_staging": "CFS CSI (POSIX/NFS)",
+      "object_storage": "COS",
+      "archive_provider": "tencentcloud",
+      "values": "deploy/clouds/tencentcloud/values.yaml"
+    },
+    {
+      "id": "azure",
+      "kubernetes": "AKS",
+      "postgresql": "Azure Database for PostgreSQL",
+      "shared_staging": "Azure Files CSI (NFS; verify flock across nodes)",
+      "object_storage": "Blob",
+      "archive_provider": "azure",
+      "values": "deploy/clouds/azure/values.yaml"
+    }
+  ],
+  "common_dependencies": [
+    "external PostgreSQL + PITR",
+    "3-node TLS JetStream + durable RWO PVC per node",
+    "shared RWX staging with cross-node POSIX locking",
+    "private object storage + TLS",
+    "backup target + restore drill",
+    "ingress or external TLS gateway",
+    "Prometheus Operator CRDs when serviceMonitor enabled",
+    "KEDA CRDs only if queue autoscaling enabled"
+  ],
+  "not_provisioned": [
+    "cloud accounts/VPC/IAM",
+    "CSI controllers/filesystems",
+    "DNS/certificates",
+    "merchant credentials",
+    "tax invoicing provider"
+  ],
+  "object_storage_credentials": "file-mounted keys currently; cloud workload identity rotation is not implemented"
+}
