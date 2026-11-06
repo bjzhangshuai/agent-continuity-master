@@ -181,6 +181,19 @@ public sealed class AgentContinuityClient(HttpClient httpClient, string baseUrl,
 {
     public Task<JsonObject> ListStorageJobsAsync(string taskId, long after = 0, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Get, $"/v1/tasks/{Uri.EscapeDataString(taskId)}/storage-jobs?after={after}", null, cancellation);
     public Task<JsonObject> GetStorageJobAsync(string taskId, long jobId, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Get, $"/v1/tasks/{Uri.EscapeDataString(taskId)}/storage-jobs/{jobId}", null, cancellation);
+    public async Task<JsonObject> WaitStorageJobAsync(string taskId, long jobId, TimeSpan timeout, CancellationToken cancellation = default)
+    {
+        if (timeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        linked.CancelAfter(timeout);
+        while (true) {
+            var job = await GetStorageJobAsync(taskId, jobId, linked.Token);
+            var state = job["state"]?.GetValue<string>();
+            if (state == "stored") return job;
+            if (state is "dead" or "deleted") throw new InvalidOperationException($"Archive job ended in {state}");
+            await Task.Delay(1000, linked.Token);
+        }
+    }
     public Task<JsonObject> RetryStorageJobAsync(string taskId, long jobId, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Post, $"/v1/tasks/{Uri.EscapeDataString(taskId)}/storage-jobs/{jobId}/retry", null, cancellation);
     public Task<JsonObject> UploadContentAsync(string taskId, string artifactId, string versionId, string filename, string contentType, byte[] content, string parentVersionId = "", CancellationToken cancellation = default)
     {
@@ -205,16 +218,30 @@ public sealed class AgentContinuityClient(HttpClient httpClient, string baseUrl,
     public Task<SyncPullResponse> SyncPullAsync(string deviceId, List<PullCursor> tasks, CancellationToken cancellation = default) => RequestAsync<SyncPullResponse>(HttpMethod.Post, "/v1/sync/pull", new { device_id = deviceId, tasks }, cancellation);
     public async Task SyncAckAsync(string deviceId, List<AckCursor> tasks, CancellationToken cancellation = default) => await RequestAsync(HttpMethod.Post, "/v1/sync/ack", new { device_id = deviceId, tasks }, cancellation);
 
-    private async Task<T> RequestAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellation)
+    public Task<JsonObject> ListInvoicesAsync(CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Get, "/v1/billing/invoices?limit=200", null, cancellation);
+    public Task<JsonObject> GetInvoiceAsync(string id, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Get, $"/v1/billing/invoices/{Uri.EscapeDataString(id)}", null, cancellation);
+    public Task<JsonObject> QuoteInvoiceAsync(JsonObject period, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Post, "/v1/billing/quote", period, cancellation);
+    public Task<JsonObject> IssueInvoiceAsync(JsonObject period, string key, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Post, "/v1/billing/invoices", period, cancellation, key);
+    public Task<JsonObject> CreatePaymentAsync(string id, string provider, string key, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Post, $"/v1/billing/invoices/{Uri.EscapeDataString(id)}/payments", new { provider }, cancellation, key);
+    public Task<JsonObject> ReconcilePaymentAsync(string id, string payment, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Post, $"/v1/billing/invoices/{Uri.EscapeDataString(id)}/payments/{Uri.EscapeDataString(payment)}/reconcile", null, cancellation);
+    public Task<JsonObject> RequestRefundAsync(string id, string payment, long amountMinor, string reason, string key, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Post, $"/v1/billing/invoices/{Uri.EscapeDataString(id)}/refunds", new { payment_id = payment, amount_minor = amountMinor, reason }, cancellation, key);
+    public Task<JsonObject> ReconcileRefundAsync(string id, string refund, CancellationToken cancellation = default) => RequestAsync<JsonObject>(HttpMethod.Post, $"/v1/billing/invoices/{Uri.EscapeDataString(id)}/refunds/{Uri.EscapeDataString(refund)}/reconcile", null, cancellation);
+    public async Task<string> InvoiceStatementAsync(string id, CancellationToken cancellation = default) {
+        using var response = await SendAsync(HttpMethod.Get, $"/v1/billing/invoices/{Uri.EscapeDataString(id)}/statement", null, cancellation);
+        return await response.Content.ReadAsStringAsync(cancellation);
+    }
+
+    private async Task<T> RequestAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellation, string? key = null)
     {
-        using var response = await SendAsync(method, path, body, cancellation); var data = await response.Content.ReadAsByteArrayAsync(cancellation);
+        using var response = await SendAsync(method, path, body, cancellation, key); var data = await response.Content.ReadAsByteArrayAsync(cancellation);
         if (data.Length == 0) throw new InvalidDataException("API returned an empty response");
         return JsonSerializer.Deserialize<T>(data, SDK.Json) ?? throw new InvalidDataException("API returned invalid JSON");
     }
     private async Task RequestAsync(HttpMethod method, string path, object? body, CancellationToken cancellation) { using var response = await SendAsync(method, path, body, cancellation); }
-    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body, CancellationToken cancellation)
+    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body, CancellationToken cancellation, string? key = null)
     {
         using var request = new HttpRequestMessage(method, BaseUrl + path); request.Headers.Accept.ParseAdd("application/json"); request.Headers.UserAgent.ParseAdd($"agent-continuity-dotnet/{SDK.Version}");
+        if (key is not null) request.Headers.Add("Idempotency-Key", key);
         if (!string.IsNullOrEmpty(Token)) request.Headers.Authorization = new("Bearer", Token);
         if (body is not null) request.Content = JsonContent.Create(body, options: SDK.Json);
         var response = await Http.SendAsync(request, cancellation);

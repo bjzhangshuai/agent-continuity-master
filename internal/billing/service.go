@@ -26,11 +26,36 @@ type PriceBook struct {
 }
 
 func DemoPriceBook() PriceBook {
-	return PriceBook{Version: "demo-2026-09-v1", TestMode: true, Currencies: map[string][]protocol.BillingRate{
+	book := PriceBook{Version: "demo-2026-09-v2", TestMode: true, Currencies: map[string][]protocol.BillingRate{
 		"CNY": {{Metric: "api.mutation", Description: "API 变更操作（演示定价）", Unit: "operation", UnitSize: 1, UnitPriceMinor: 1}, {Metric: "artifact.bytes", Description: "产物上传字节（演示定价，非容量月租）", Unit: "byte", UnitSize: 1024, UnitPriceMinor: 1}},
 		"USD": {{Metric: "api.mutation", Description: "API mutations (test price)", Unit: "operation", UnitSize: 1, UnitPriceMinor: 1}, {Metric: "artifact.bytes", Description: "Artifact upload bytes (test price)", Unit: "byte", UnitSize: 1024, UnitPriceMinor: 1}},
 		"EUR": {{Metric: "api.mutation", Description: "API mutations (test price)", Unit: "operation", UnitSize: 1, UnitPriceMinor: 1}, {Metric: "artifact.bytes", Description: "Artifact upload bytes (test price)", Unit: "byte", UnitSize: 1024, UnitPriceMinor: 1}},
 	}}
+	// Storage meters need explicit rates; default zero avoids surprising charges.
+	for currency, rates := range book.Currencies {
+		book.Currencies[currency] = append(rates,
+			protocol.BillingRate{Metric: "storage.archive.bytes", Description: "逻辑归档量（默认免费，避免重复计上传费）", Unit: "byte", UnitSize: 1 << 30},
+			protocol.BillingRate{Metric: "storage.retained.byte_hours", Description: "归档保留时长（默认免费）", Unit: "byte_hour", UnitSize: (1 << 30) * 730},
+			protocol.BillingRate{Metric: "storage.download.bytes", Description: "对象存储成功回源字节（默认免费）", Unit: "byte", UnitSize: 1 << 30})
+	}
+	return book
+}
+
+func (b PriceBook) ValidateArchiveRates() error {
+	for currency, rates := range b.Currencies {
+		for metric, unit := range map[string]string{"storage.archive.bytes": "byte", "storage.retained.byte_hours": "byte_hour", "storage.download.bytes": "byte"} {
+			found := false
+			for _, r := range rates {
+				if r.Metric == metric && r.Unit == unit {
+					found = true
+				}
+			}
+			if !found {
+				return fmt.Errorf("%w: %s needs an explicit %s rate (zero is allowed)", ErrInvalid, currency, metric)
+			}
+		}
+	}
+	return nil
 }
 func ParsePriceBook(raw string) (PriceBook, error) {
 	if raw == "" {
@@ -504,6 +529,7 @@ func (s *Service) Run(ctx context.Context, logger *slog.Logger) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			s.recoverRefunds(ctx)
 			targets, err := s.Repo.DuePayments(ctx, s.now().Add(-2*time.Minute), 10)
 			if err != nil {
 				logger.Warn("payment reconciliation scan failed")

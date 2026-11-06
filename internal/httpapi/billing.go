@@ -25,6 +25,7 @@ func WithPayments(providers *payments.Registry, book billing.PriceBook, baseURL 
 	}
 }
 func (s *Server) registerBillingRoutes(mux *http.ServeMux) {
+	s.registerRefundRoutes(mux)
 	mux.HandleFunc("GET /v1/billing/providers", s.paymentProviders)
 	mux.HandleFunc("POST /v1/billing/quote", s.quoteInvoice)
 	mux.HandleFunc("POST /v1/billing/invoices", s.issueInvoice)
@@ -174,7 +175,7 @@ func (s *Server) getInvoice(w http.ResponseWriter, r *http.Request) {
 			links[p.ID] = s.billing.Link(p)
 		}
 	}
-	writeJSON(w, 200, map[string]any{"invoice": d.Invoice, "payments": d.Payments, "receipts": d.Receipts, "events": d.Events, "version": d.Version, "payment_links": links, "can_pay": canPay})
+	writeJSON(w, 200, map[string]any{"invoice": d.Invoice, "payments": d.Payments, "receipts": d.Receipts, "refunds": d.Refunds, "credit_notes": d.CreditNotes, "events": d.Events, "version": d.Version, "payment_links": links, "can_pay": canPay})
 }
 func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 	claims, ok := s.authorizeInvoiceScope(w, r, "billing:write")

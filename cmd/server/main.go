@@ -123,6 +123,21 @@ func main() {
 		}
 		workerCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 		defer stop()
+		address := os.Getenv("CONTINUITY_ARCHIVE_HEALTH_ADDRESS")
+		if address != "" {
+			health := &http.Server{Addr: address, Handler: archiveWorker.HealthHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second}
+			go func() {
+				if err := health.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					logger.Error("archive health server", "error", err)
+					stop()
+				}
+			}()
+			defer func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = health.Shutdown(ctx)
+			}()
+		}
 		archiveWorker.Run(workerCtx)
 		return
 	}
@@ -170,6 +185,12 @@ func main() {
 	if err != nil {
 		logger.Error("invalid billing price book", "error", err)
 		os.Exit(1)
+	}
+	if archiveConfig.Enabled {
+		if err := priceBook.ValidateArchiveRates(); err != nil {
+			logger.Error("archive pricing configuration", "error", err)
+			os.Exit(2)
+		}
 	}
 	treasuryConfig, err := treasury.ParseConfig(cfg.TreasuryConfigJSON)
 	if err != nil {

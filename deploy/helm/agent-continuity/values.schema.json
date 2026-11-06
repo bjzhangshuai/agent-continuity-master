@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["existingSecret", "artifactStorage", "archive"],
+  "properties": {
+    "replicaCount": {"type":"integer", "minimum":1},
+    "existingSecret": {"type":"string", "minLength":1},
+    "secretRevision": {"type":"string"},
+    "imagePullSecrets": {"type":"array", "items":{"type":"object", "required":["name"], "properties":{"name":{"type":"string","minLength":1}}}},
+    "artifactStorage": {"type":"object", "properties":{
+      "backend":{"enum":["local","s3"]}, "accessMode":{"enum":["ReadWriteOnce","ReadWriteMany"]}
+    }},
+    "archive": {"type":"object", "properties":{
+      "enabled":{"type":"boolean"}, "workerReplicas":{"type":"integer","minimum":1,"maximum":100},
+      "broker":{"type":"object", "properties":{"install":{"type":"boolean"},"existingSecret":{"type":"string"}}},
+      "autoscaling":{"type":"object","properties":{"minReplicas":{"type":"integer","minimum":1},"maxReplicas":{"type":"integer","minimum":1,"maximum":100}}}
+    }},
+    "backup":{"type":"object","properties":{"retentionDays":{"type":"integer","minimum":1,"maximum":3650}}}
+  }
+}

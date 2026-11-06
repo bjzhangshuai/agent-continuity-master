@@ -25,6 +25,7 @@ func TestNativeProviderContracts(t *testing.T) {
 			var stored []byte
 			authorized := false
 			puts := 0
+			deletes := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
 				defer mu.Unlock()
@@ -79,10 +80,24 @@ func TestNativeProviderContracts(t *testing.T) {
 					return
 				}
 				if r.Method == "GET" {
+					if stored == nil {
+						w.WriteHeader(404)
+						return
+					}
 					w.Write(stored)
 					return
 				}
 				if r.Method == "HEAD" {
+					return
+				}
+				if r.Method == "DELETE" {
+					stored = nil
+					deletes++
+					if kind == "azure" {
+						w.WriteHeader(202)
+					} else {
+						w.WriteHeader(204)
+					}
 					return
 				}
 				t.Errorf("unexpected HTTP method %s", r.Method)
@@ -113,9 +128,24 @@ func TestNativeProviderContracts(t *testing.T) {
 			if !bytes.Equal(got, content) {
 				t.Fatalf("round trip differs: %q", got)
 			}
+			for range 2 {
+				if err = p.Delete(context.Background(), object.Key); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if body, getErr := p.Get(context.Background(), object.Key); getErr == nil {
+				_, readErr := io.ReadAll(body)
+				body.Close()
+				if readErr == nil {
+					t.Fatal("deleted object still downloadable")
+				}
+			}
+			if _, err = Probe(context.Background(), p, target); err != nil {
+				t.Fatal(err)
+			}
 			mu.Lock()
 			defer mu.Unlock()
-			if !authorized || puts == 0 {
+			if !authorized || puts == 0 || deletes < 3 {
 				t.Fatal("native provider did not send authenticated upload")
 			}
 		})

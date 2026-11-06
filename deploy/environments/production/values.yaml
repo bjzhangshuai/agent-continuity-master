@@ -5,6 +5,7 @@ image:
   pullPolicy: IfNotPresent
 postgresql:
   enabled: false
+databaseTLS: {existingSecret: continuity-database-tls}
 autoscaling:
   enabled: true
   minReplicas: 3
@@ -15,12 +16,16 @@ podDisruptionBudget:
 serviceMonitor:
   enabled: true
 artifactStorage:
-  backend: s3
-  s3:
-    endpoint: https://s3.example.invalid
-    bucket: agent-continuity-production
-    region: us-east-1
-    autoCreate: false
+  backend: local
+  accessMode: ReadWriteMany
+  existingClaim: continuity-staging-rwx
+archive:
+  enabled: true
+  existingSecret: agent-continuity-archive
+  broker: {install: false, existingSecret: continuity-nats-auth}
+  workerReplicas: 3
+  workerPDB: {enabled: true, minAvailable: 2}
+  autoscaling: {enabled: true, minReplicas: 3, maxReplicas: 16}
 affinity:
   podAntiAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:
@@ -31,6 +36,11 @@ affinity:
             matchLabels:
               app.kubernetes.io/component: server
 networkPolicy:
+  # REQUIRED: override with the real private database CIDRs or Pod selectors.
+  databasePeers: []
+  brokerPeers:
+    - podSelector:
+        matchLabels: {app.kubernetes.io/name: nats, app.kubernetes.io/instance: agent-continuity-infra}
   externalEgress:
     - cidr: 0.0.0.0/0
       except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]

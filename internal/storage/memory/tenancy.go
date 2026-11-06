@@ -138,7 +138,7 @@ func (s *Store) ListMerchantBills(_ context.Context, limit int) ([]protocol.Bill
 	}
 	out := []protocol.BillingDocument{}
 	for _, d := range s.billingDocuments {
-		if d.Invoice.Status == "paid" && len(d.Receipts) > 0 {
+		if (d.Invoice.Status == "paid" || d.Invoice.Status == "refunded" || d.Invoice.Status == "disputed") && len(d.Receipts) > 0 {
 			out = append(out, cloneBill(d))
 		}
 	}

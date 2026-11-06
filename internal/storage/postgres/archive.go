@@ -47,11 +47,11 @@ func (q *ArchiveQueue) Configure(ctx context.Context, c archive.Config) error {
 	return tx.Commit(ctx)
 }
 
-const archiveColumns = `job_id,task_id,organization_id,account_id,source_kind,resource_id,version_id,target_id,state,attempts,lease_version,source_ref,content_type,content_hash,size,object_key,error_code,created_at,updated_at,next_attempt`
+const archiveColumns = `job_id,task_id,organization_id,account_id,source_kind,resource_id,version_id,target_id,state,attempts,lease_version,source_ref,content_type,content_hash,size,object_key,error_code,created_at,updated_at,next_attempt,operation,stored_at,deleted_at,retain_until,legal_hold`
 
 func scanArchive(row pgx.Row) (archive.Job, error) {
 	var j archive.Job
-	err := row.Scan(&j.ID, &j.TaskID, &j.OrganizationID, &j.AccountID, &j.Kind, &j.ResourceID, &j.VersionID, &j.TargetID, &j.State, &j.Attempts, &j.LeaseVersion, &j.SourceRef, &j.ContentType, &j.ContentHash, &j.Size, &j.ObjectKey, &j.ErrorCode, &j.CreatedAt, &j.UpdatedAt, &j.NextAttempt)
+	err := row.Scan(&j.ID, &j.TaskID, &j.OrganizationID, &j.AccountID, &j.Kind, &j.ResourceID, &j.VersionID, &j.TargetID, &j.State, &j.Attempts, &j.LeaseVersion, &j.SourceRef, &j.ContentType, &j.ContentHash, &j.Size, &j.ObjectKey, &j.ErrorCode, &j.CreatedAt, &j.UpdatedAt, &j.NextAttempt, &j.Operation, &j.StoredAt, &j.DeletedAt, &j.RetainUntil, &j.LegalHold)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = archive.ErrNotFound
 	}
@@ -101,7 +101,7 @@ func (q *ArchiveQueue) Complete(ctx context.Context, j archive.Job, r archive.Re
 		return err
 	}
 	defer tx.Rollback(ctx)
-	res, err := tx.Exec(ctx, `UPDATE archive_jobs SET state='stored',object_key=$3,content_hash=$4,size=$5,error_code='',lease_until=NULL,updated_at=now() WHERE job_id=$1 AND lease_version=$2 AND state='processing' AND lease_until>now()`, j.ID, j.LeaseVersion, r.Key, r.Hash, r.Size)
+	res, err := tx.Exec(ctx, `UPDATE archive_jobs SET state='stored',object_key=$3,content_hash=$4,size=$5,error_code='',lease_until=NULL,updated_at=now(),stored_at=COALESCE(stored_at,now()),retain_until=now()+($6*interval '1 day') WHERE job_id=$1 AND lease_version=$2 AND operation='archive' AND state='processing' AND lease_until>now()`, j.ID, j.LeaseVersion, r.Key, r.Hash, r.Size, r.RetentionDays)
 	if err != nil {
 		return err
 	}

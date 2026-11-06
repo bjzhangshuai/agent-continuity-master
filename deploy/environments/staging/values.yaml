@@ -1,4 +1,6 @@
 replicaCount: 2
+postgresql: {enabled: false}
+databaseTLS: {existingSecret: continuity-database-tls}
 image:
   pullPolicy: IfNotPresent
 autoscaling:
@@ -11,13 +13,21 @@ podDisruptionBudget:
 serviceMonitor:
   enabled: true
 artifactStorage:
-  backend: s3
-  s3:
-    endpoint: https://s3.staging.example.invalid
-    bucket: agent-continuity-staging
-    region: us-east-1
-    autoCreate: false
+  backend: local
+  accessMode: ReadWriteMany
+  existingClaim: continuity-staging-rwx
+archive:
+  enabled: true
+  existingSecret: agent-continuity-archive
+  broker: {install: false, existingSecret: continuity-nats-auth}
+  workerReplicas: 2
+  workerPDB: {enabled: true, minAvailable: 1}
+  autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 8}
 networkPolicy:
+  databasePeers: []
+  brokerPeers:
+    - podSelector:
+        matchLabels: {app.kubernetes.io/name: nats, app.kubernetes.io/instance: agent-continuity-infra}
   externalEgress:
     - cidr: 0.0.0.0/0
       except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]

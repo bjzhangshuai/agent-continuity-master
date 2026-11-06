@@ -14,3 +14,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: server
 {{- end }}
 {{- define "agent-continuity.serviceAccountName" -}}{{ include "agent-continuity.fullname" . }}{{- end }}
+{{- define "agent-continuity.secretChecksum" -}}
+{{- $all := dict "revision" .Values.secretRevision -}}
+{{- $root := . -}}
+{{- range list .Values.existingSecret .Values.databaseTLS.existingSecret .Values.archive.existingSecret .Values.archive.storageSecret .Values.archive.broker.existingSecret .Values.payments.existingSecret .Values.treasury.existingSecret -}}
+{{- if . -}}{{- $secret := lookup "v1" "Secret" $root.Release.Namespace . -}}{{- $_ := set $all . ($secret.data | default dict) -}}{{- end -}}
+{{- end -}}
+{{- toJson $all | sha256sum -}}
+{{- end -}}

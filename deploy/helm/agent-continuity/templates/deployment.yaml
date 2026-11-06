@@ -26,10 +26,15 @@ spec:
     metadata:
       annotations:
         continuity.agent-continuity.io/image-id: {{ .Values.image.buildID | quote }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secrets: {{ include "agent-continuity.secretChecksum" . }}
       labels:
         {{- include "agent-continuity.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/part-of: agent-continuity
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
       serviceAccountName: {{ include "agent-continuity.serviceAccountName" . }}
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
@@ -44,6 +49,9 @@ spec:
         - name: migrate-and-wait-for-database
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.databaseTLS.existingSecret }}
+          volumeMounts: [{name: database-tls, mountPath: /run/database-tls, readOnly: true}]
+          {{- end }}
           command: ["/bin/sh", "-c"]
           args:
             - 'attempt=0; until /app/server migrate; do attempt=$((attempt+1)); [ "$attempt" -ge 30 ] && exit 1; sleep 2; done'
@@ -172,6 +180,12 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
+            {{- if .Values.archive.storageSecret }}
+            - {name: archive-storage, mountPath: /run/archive-storage, readOnly: true}
+            {{- end }}
+            {{- if .Values.databaseTLS.existingSecret }}
+            - {name: database-tls, mountPath: /run/database-tls, readOnly: true}
+            {{- end }}
             {{- if .Values.archive.existingSecret }}
             - {name: archive-secrets, mountPath: /run/archive, readOnly: true}
             {{- end }}
@@ -190,6 +204,14 @@ spec:
             - name: tmp
               mountPath: /tmp
       volumes:
+        {{- if .Values.archive.storageSecret }}
+        - name: archive-storage
+          secret: {secretName: {{ .Values.archive.storageSecret }}, defaultMode: 0440}
+        {{- end }}
+        {{- if .Values.databaseTLS.existingSecret }}
+        - name: database-tls
+          secret: {secretName: {{ .Values.databaseTLS.existingSecret }}, defaultMode: 0440}
+        {{- end }}
         {{- if .Values.archive.existingSecret }}
         - name: archive-secrets
           secret: {secretName: {{ .Values.archive.existingSecret }}, defaultMode: 0440}

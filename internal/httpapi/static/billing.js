@@ -26,8 +26,8 @@ async function loadBillingFinance(accounts = finance.accounts) {
 }
 function renderFinanceSummary() {
   const group = new Map();
-  for (const d of finance.invoices) { const i = d.invoice; const key = `${i.test_mode ? "test" : "live"}/${i.currency}`; if (!group.has(key)) group.set(key, {currency:i.currency, test:i.test_mode, open:0, paid:0, receipts:0}); const g = group.get(key); if (i.status === "open") g.open += i.amount_minor; if (i.status === "paid") g.paid += i.amount_minor; g.receipts += d.receipts.length; }
-  $("finance-summary").replaceChildren(...Array.from(group.values(), (g) => { const card = el("article", "", "card"); card.append(el("span", g.test ? tr("本列表 · 模拟 / 沙箱账目", "Listed invoices · simulation / sandbox") : tr("本列表 · 正式账目", "Listed invoices · live"), "eyebrow"), el("h3", `${tr("待付", "Open")} ${money(g.open, g.currency)}`), el("p", `${tr("已付", "Paid")} ${money(g.paid, g.currency)} · ${g.receipts} ${tr("份回执（最近 200 张账单范围）", "receipts (latest 200 invoices)")}`, "muted")); return card; }));
+  for (const d of finance.invoices) { const i = d.invoice; const key = `${i.test_mode ? "test" : "live"}/${i.currency}`; if (!group.has(key)) group.set(key, {currency:i.currency, test:i.test_mode, open:0, paid:0, refunded:0, receipts:0}); const g = group.get(key); if (i.status === "open") g.open += i.amount_minor; g.paid += (d.receipts || []).reduce((sum,r)=>sum+r.amount_minor,0); g.refunded += (d.credit_notes || []).reduce((sum,n)=>sum+n.amount_minor,0); g.receipts += (d.receipts || []).length; }
+  $("finance-summary").replaceChildren(...Array.from(group.values(), (g) => { const card = el("article", "", "card"); card.append(el("span", g.test ? tr("本列表 · 模拟 / 沙箱账目", "Listed invoices · simulation / sandbox") : tr("本列表 · 正式账目", "Listed invoices · live"), "eyebrow"), el("h3", `${tr("待付", "Open")} ${money(g.open, g.currency)}`), el("p", `${tr("原收款", "Gross paid")} ${money(g.paid,g.currency)} · ${tr("已退款", "Refunded")} ${money(g.refunded,g.currency)} · ${tr("净收款", "Net paid")} ${money(g.paid-g.refunded,g.currency)}`), el("p", `${g.receipts} ${tr("份回执（最近 200 张账单范围）", "receipts (latest 200 invoices)")}`, "muted")); return card; }));
 }
 function renderInvoiceList() {
   const filtered = finance.invoices.filter((d) => !$("invoice-status").value || d.invoice.status === $("invoice-status").value);
@@ -60,6 +60,7 @@ async function showInvoice(id, scroll = true) {
   const actions = el("div", "", "section-actions"); actions.append(financeButton(tr("下载消费明细 CSV", "Download charges CSV"), () => downloadBilling(`/v1/billing/invoices/${id}/export`, `${i.number}.csv`)));
   if (i.status === "open" && !d.payments.length) actions.append(financeButton(tr("作废未支付账单", "Void unpaid invoice"), async () => { await api(`/v1/billing/invoices/${id}/void`, {method:"POST"}); await loadBillingFinance(); }));
   target.append(actions);
+  renderRefunds(target,d,()=>showInvoice(id,false));
   if (i.status === "open" && !d.payments.some((p) => ["creating","pending","approved","succeeded"].includes(p.status))) {
     const provider = document.createElement("select"); provider.setAttribute("aria-label", tr("选择付款渠道", "Choose payment provider")); const eligible = finance.providers.filter((p) => p.enabled && p.currencies.includes(i.currency) && i.test_mode === (p.environment !== "live"));
     provider.replaceChildren(...eligible.map((p) => { const option = el("option", p.name); option.value = p.id; return option; }));

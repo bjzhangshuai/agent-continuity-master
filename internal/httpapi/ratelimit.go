@@ -76,6 +76,11 @@ func requestLimit(path string) int {
 }
 
 func rateClass(path string) string {
+	// Login/token traffic must not prevent an existing session from signing out.
+	// Logout still has its own bounded IP bucket and its normal CSRF checks.
+	if path == "/v1/auth/session/logout" || path == "/v1/auth/logout" {
+		return "logout"
+	}
 	if strings.HasPrefix(path, "/v1/auth/") || path == "/v1/accounts" {
 		return "auth"
 	}

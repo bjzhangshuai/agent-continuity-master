@@ -1,0 +1,21 @@
+dependencies:
+- name: nats
+  repository: https://nats-io.github.io/k8s/helm/charts/
+  version: 2.14.6
+- name: minio
+  repository: file://../vendor/minio
+  version: 5.4.0-continuity.1
+- name: kube-prometheus-stack
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 88.6.3
+- name: keda
+  repository: https://kedacore.github.io/charts
+  version: 2.20.2
+- name: opentelemetry-collector
+  repository: https://open-telemetry.github.io/opentelemetry-helm-charts
+  version: 0.172.0
+- name: tempo
+  repository: https://grafana.github.io/helm-charts
+  version: 1.24.4
+digest: sha256:072b64b6761a5db7ff22b37429d3a57123a3c4fa2666ce34c96641834c571607
+generated: "2026-09-04T00:22:05.856146+08:00"

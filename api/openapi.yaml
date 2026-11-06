@@ -33,7 +33,7 @@ paths:
     get:
       parameters: [{$ref: '#/components/parameters/TaskID'}, {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}]
       description: Authorized task/attachment jobs, paginated at 100. Follow next_after while has_more.
-      responses: {'200': {description: jobs, next_after, has_more; states queued/processing/retry/stored/dead}, '403': {$ref: '#/components/responses/Error'}}
+      responses: {'200': {description: 'jobs, next_after, has_more; states queued/processing/retry/stored/dead/deleted; operation archive/delete; stored_at/deleted_at/retain_until/legal_hold'}, '403': {$ref: '#/components/responses/Error'}}
   /v1/tasks/{taskID}/storage-jobs/{jobID}:
     get:
       parameters: [{$ref: '#/components/parameters/TaskID'}, {name: jobID, in: path, required: true, schema: {type: integer, format: int64}}]
@@ -53,6 +53,26 @@ paths:
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       description: Task administrator explicitly archives at most 100 historical events/artifacts. No automatic historical export.
       responses: {'202': {description: enqueued and batch_limit}, '403': {$ref: '#/components/responses/Error'}, '503': {description: Outbox full}}
+  /v1/tasks/{taskID}/storage-jobs/{jobID}/delete:
+    post:
+      parameters: [{$ref: '#/components/parameters/TaskID'}, {name: jobID, in: path, required: true, schema: {type: integer, format: int64}}]
+      description: 'Task/attachment admin requests deletion of this CURRENT archive object only. Requires lifecycle.allow_delete, matching hash, expired retention, no legal hold, and local durability not relinquished to cache eviction. Never erases source conversations or noncurrent bucket versions. Request and completion are audited; same-hash repeats are idempotent.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [confirm_hash, reason], properties: {confirm_hash: {type: string}, reason: {type: string, minLength: 8, maxLength: 500}}}
+      responses: {'202': {description: Durable deletion queued}, '403': {$ref: '#/components/responses/Error'}, '409': {description: Protected by retention/hold/cache durability or mismatched hash}}
+  /v1/tasks/{taskID}/storage-jobs/{jobID}/hold:
+    post:
+      parameters: [{$ref: '#/components/parameters/TaskID'}, {name: jobID, in: path, required: true, schema: {type: integer, format: int64}}]
+      description: 'Task/attachment administrator may place a hold. Releasing also requires platform super-admin. Cannot change hold once deletion has been queued. Every change is audited.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [hold, reason], properties: {hold: {type: boolean}, reason: {type: string, minLength: 8, maxLength: 500}}}
+      responses: {'200': {description: Hold updated}, '403': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
   /v1/auth/login:
     post:
       security: []
@@ -474,6 +494,35 @@ paths:
       parameters: [{name: provider, in: path, required: true, schema: {enum: [wechat, alipay, paypal, stripe]}}]
       description: Provider-specific signature required on raw body; bounded at 256 KiB. Unverified input never marks an invoice paid.
       responses: {'204': {description: Verified notification accepted or unsupported verified event ignored}, '200': {description: Alipay success text acknowledgement}, '400': {$ref: '#/components/responses/Error'}}
+  /v1/billing/invoices/{invoiceID}/refunds:
+    post:
+      operationId: requestRefund
+      description: Tenant owner/billing requests original-route refund. Invoice CAS reserves amount including pending requests; historical receipt and invoice amount remain immutable.
+      parameters: [{$ref: '#/components/parameters/InvoiceID'}, {$ref: '#/components/parameters/BillingIdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [payment_id,amount_minor,reason], properties: {payment_id: {type: string}, amount_minor: {type: integer, minimum: 1}, reason: {type: string, maxLength: 240}}}}}}
+      responses: {'200': {description: Requested refund or identical idempotent result}, '400': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+  /v1/billing/invoices/{invoiceID}/refunds/{refundID}/reconcile:
+    post:
+      operationId: reconcileRefund
+      parameters: [{$ref: '#/components/parameters/InvoiceID'}, {name: refundID, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: Verified refund result or unchanged terminal record}, '502': {$ref: '#/components/responses/Error'}}
+  /v1/billing/invoices/{invoiceID}/statement:
+    get:
+      operationId: downloadBillingStatement
+      parameters: [{$ref: '#/components/parameters/InvoiceID'}]
+      responses: {'200': {description: Printable consumption, original payment receipt and refund credit notes; not a tax invoice, content: {text/html: {schema: {type: string}}}}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/treasury/receivables/{invoiceID}/statement:
+    get:
+      operationId: downloadMerchantStatement
+      parameters: [{$ref: '#/components/parameters/InvoiceID'}]
+      responses: {'200': {description: Configured merchant evidence only; no payer checkout authority}}
+  /v1/treasury/receivables/{invoiceID}/refunds/{refundID}/{action}:
+    post:
+      operationId: operateRefund
+      description: Configured merchant only. decision requires treasury:approve; other actions treasury:write. Live approval requires a different account from the requester. simulate is demo-only. No request accepts an alternate refund destination.
+      parameters: [{$ref: '#/components/parameters/InvoiceID'}, {name: refundID, in: path, required: true, schema: {type: string}}, {name: action, in: path, required: true, schema: {enum: [decision,submit,reconcile,simulate]}}]
+      requestBody: {content: {application/json: {schema: {type: object, properties: {decision: {enum: [approved,rejected]}, reason: {type: string}, outcome: {enum: [succeeded,failed]}}}}}}
+      responses: {'200': {description: Updated refund and credit note evidence}, '403': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}, '502': {$ref: '#/components/responses/Error'}}
   /v1/marketplace/listings:
     get: {security: [], responses: {'200': {description: Published marketplace listings}}}
     post: {responses: {'201': {description: Marketplace listing created}}}
@@ -636,6 +685,8 @@ components:
         invoice: {$ref: '#/components/schemas/BillingInvoice'}
         payments: {type: array, items: {$ref: '#/components/schemas/BillingPayment'}}
         receipts: {type: array, items: {type: object, description: Server-confirmed payment receipt; not a tax invoice}}
+        refunds: {type: array, items: {type: object, properties: {refund_id: {type: string}, payment_id: {type: string}, amount_minor: {type: integer}, currency: {type: string}, status: {enum: [requested,approved,rejected,submitting,pending,succeeded,failed,review]}, requested_by: {type: string}, decided_by: {type: string}, provider_refund_id: {type: string}, reason: {type: string}, last_error: {type: string}}}}
+        credit_notes: {type: array, items: {type: object, description: Immutable refund credit evidence, not tax invoice or bank confirmation}}
         events: {type: array, items: {type: object}}
         payment_links: {type: object, additionalProperties: {type: string, format: uri}}
         can_pay: {type: boolean, description: Effective current actor permission; false for read-only tenant admin and merchant evidence}

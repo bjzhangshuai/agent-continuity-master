@@ -1,0 +1,9 @@
+# Safe additive install alongside the existing application release.
+# PostgreSQL + single-node JetStream are already managed by the application chart.
+nats: {enabled: false}
+minio: {enabled: true}
+minioBootstrap: {manageSecrets: true}
+monitoring: {enabled: false}
+keda: {enabled: false}
+otel: {enabled: false}
+tempo: {enabled: false}

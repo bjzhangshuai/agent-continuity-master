@@ -1,0 +1,14 @@
+# Use after installing infra-observability-values.yaml in the application's namespace.
+# Label that namespace continuity.agent-continuity.io/monitor=true for discovery.
+serviceMonitor: {enabled: true}
+observability:
+  otlpTracesEndpoint: http://continuity-otel:4318/v1/traces
+networkPolicy:
+  monitoringNamespaceLabels: {continuity.agent-continuity.io/monitor: "true"}
+  otlpPeers:
+    - podSelector: {matchLabels: {app.kubernetes.io/instance: agent-continuity-infra, app.kubernetes.io/name: otel}}
+archive:
+  autoscaling: {enabled: false}
+  queueAutoscaling:
+    enabled: true
+    serverAddress: http://continuity-monitoring-prometheus:9090

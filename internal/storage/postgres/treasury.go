@@ -23,6 +23,20 @@ func (s *Store) LoadTreasury(ctx context.Context, owner string) (protocol.Treasu
 	return d, err
 }
 func (s *Store) SaveTreasury(ctx context.Context, d protocol.TreasuryDocument, version int64) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	for _, c := range d.Collections {
+		var current int64
+		if err = tx.QueryRow(ctx, `SELECT version FROM billing_documents WHERE invoice_id=$1 FOR SHARE`, c.InvoiceID).Scan(&current); err != nil {
+			return err
+		}
+		if current != c.BillingVersion {
+			return treasury.ErrConflict
+		}
+	}
 	d.Version = version + 1
 	raw, err := json.Marshal(d)
 	if err != nil {
@@ -30,11 +44,11 @@ func (s *Store) SaveTreasury(ctx context.Context, d protocol.TreasuryDocument, v
 	}
 	var changed int64
 	if version == 0 {
-		tag, e := s.pool.Exec(ctx, `INSERT INTO treasury_documents(owner_account_id,version,document) VALUES($1,1,$2) ON CONFLICT DO NOTHING`, d.OwnerAccountID, raw)
+		tag, e := tx.Exec(ctx, `INSERT INTO treasury_documents(owner_account_id,version,document) VALUES($1,1,$2) ON CONFLICT DO NOTHING`, d.OwnerAccountID, raw)
 		err = e
 		changed = tag.RowsAffected()
 	} else {
-		tag, e := s.pool.Exec(ctx, `UPDATE treasury_documents SET version=$1,document=$2,updated_at=now() WHERE owner_account_id=$3 AND version=$4`, d.Version, raw, d.OwnerAccountID, version)
+		tag, e := tx.Exec(ctx, `UPDATE treasury_documents SET version=$1,document=$2,updated_at=now() WHERE owner_account_id=$3 AND version=$4`, d.Version, raw, d.OwnerAccountID, version)
 		err = e
 		changed = tag.RowsAffected()
 	}
@@ -44,5 +58,5 @@ func (s *Store) SaveTreasury(ctx context.Context, d protocol.TreasuryDocument, v
 	if changed != 1 {
 		return treasury.ErrConflict
 	}
-	return nil
+	return tx.Commit(ctx)
 }

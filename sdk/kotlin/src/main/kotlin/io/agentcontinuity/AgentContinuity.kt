@@ -186,8 +186,31 @@ public data class SyncHelloRequest(
 public class APIException(public val status: Int, public val code: String, message: String) : RuntimeException("API $status $code: $message")
 
 public class AgentContinuityClient(public val baseUrl: String, public var token: String = "", public val timeoutMillis: Int = 30_000) {
+    public fun listInvoices(): JsonElement = requestJson("GET", "/v1/billing/invoices?limit=200")
+    public fun getInvoice(id: String): JsonElement = requestJson("GET", "/v1/billing/invoices/${path(id)}")
+    public fun quoteInvoice(period: JsonObject): JsonElement = requestJson("POST", "/v1/billing/quote", period)
+    public fun issueInvoice(period: JsonObject, key: String): JsonElement = requestJson("POST", "/v1/billing/invoices", period, mapOf("Idempotency-Key" to key))
+    public fun createPayment(id: String, provider: String, key: String): JsonElement = requestJson("POST", "/v1/billing/invoices/${path(id)}/payments", buildJsonObject { put("provider", provider) }, mapOf("Idempotency-Key" to key))
+    public fun reconcilePayment(id: String, payment: String): JsonElement = requestJson("POST", "/v1/billing/invoices/${path(id)}/payments/${path(payment)}/reconcile")
+    public fun requestRefund(id: String, payment: String, amountMinor: Long, reason: String, key: String): JsonElement = requestJson("POST", "/v1/billing/invoices/${path(id)}/refunds", buildJsonObject { put("payment_id", payment); put("amount_minor", amountMinor); put("reason", reason) }, mapOf("Idempotency-Key" to key))
+    public fun reconcileRefund(id: String, refund: String): JsonElement = requestJson("POST", "/v1/billing/invoices/${path(id)}/refunds/${path(refund)}/reconcile")
+    public fun invoiceStatement(id: String): String = requestRaw("GET", "/v1/billing/invoices/${path(id)}/statement")
     public fun listStorageJobs(taskId: String, after: Long = 0): JsonElement = requestJson("GET", "/v1/tasks/${path(taskId)}/storage-jobs?after=$after")
     public fun getStorageJob(taskId: String, jobId: Long): JsonElement = requestJson("GET", "/v1/tasks/${path(taskId)}/storage-jobs/$jobId")
+    /** Blocking IO: call on a background dispatcher, never Android's UI thread. */
+    public fun waitStorageJob(taskId: String, jobId: Long, timeoutMillis: Long = 120000): JsonElement {
+        require(timeoutMillis in 1..86400000) { "Archive wait timeout must be 1ms..24h" }
+        val started = System.nanoTime()
+        while ((System.nanoTime() - started) / 1000000 < timeoutMillis) {
+            if (Thread.currentThread().isInterrupted) throw InterruptedException("Archive wait canceled")
+            val job = getStorageJob(taskId, jobId)
+            val state = job.jsonObject["state"]?.jsonPrimitive?.content
+            if (state == "stored") return job
+            check(state != "dead" && state != "deleted") { "Archive job ended in $state" }
+            Thread.sleep(1000)
+        }
+        throw java.util.concurrent.TimeoutException("Archive receipt timeout; upload may still finish")
+    }
     public fun retryStorageJob(taskId: String, jobId: Long): JsonElement = requestJson("POST", "/v1/tasks/${path(taskId)}/storage-jobs/$jobId/retry")
     public fun uploadContent(taskId: String, artifactId: String, versionId: String, filename: String, contentType: String, content: ByteArray, parentVersionId: String = ""): JsonElement {
         require(content.size <= 8 * 1024 * 1024) { "Use resumable upload for content larger than 8 MiB" }
@@ -213,15 +236,16 @@ public class AgentContinuityClient(public val baseUrl: String, public var token:
     public fun syncPull(deviceId: String, tasks: List<PullCursor>): SyncPullResponse = protocolJson.decodeFromJsonElement(requestJson("POST", "/v1/sync/pull", buildJsonObject { put("device_id", deviceId); put("tasks", protocolJson.encodeToJsonElement(tasks)) }))
     public fun syncAck(deviceId: String, tasks: List<AckCursor>): Unit { requestRaw("POST", "/v1/sync/ack", buildJsonObject { put("device_id", deviceId); put("tasks", protocolJson.encodeToJsonElement(tasks)) }) }
 
-    public fun requestJson(method: String, route: String, body: JsonElement? = null): JsonElement {
-        val raw = requestRaw(method, route, body)
+    public fun requestJson(method: String, route: String, body: JsonElement? = null, headers: Map<String,String> = emptyMap()): JsonElement {
+        val raw = requestRaw(method, route, body, headers)
         return if (raw.isBlank()) JsonObject(emptyMap()) else protocolJson.parseToJsonElement(raw)
     }
 
-    private fun requestRaw(method: String, route: String, body: JsonElement? = null): String {
+    private fun requestRaw(method: String, route: String, body: JsonElement? = null, headers: Map<String,String> = emptyMap()): String {
         val connection = URI(baseUrl.trimEnd('/') + route).toURL().openConnection() as HttpURLConnection
         connection.requestMethod = method; connection.connectTimeout = timeoutMillis; connection.readTimeout = timeoutMillis
         connection.setRequestProperty("Accept", "application/json"); connection.setRequestProperty("User-Agent", "agent-continuity-kotlin/$SDK_VERSION")
+        headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
         if (token.isNotEmpty()) connection.setRequestProperty("Authorization", "Bearer $token")
         if (body != null) {
             connection.doOutput = true; connection.setRequestProperty("Content-Type", "application/json")

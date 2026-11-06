@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "agents": [
+    {"id":"claude","name":"Claude Code","executables":["claude"],"config":".mcp.json","template":"claude-code.mcp.json","node":"mcpServers","capture":"adapter CLI; explicit transcript opt-in"},
+    {"id":"codebuddy","name":"CodeBuddy Code CLI","executables":["codebuddy","codebuddy-cn"],"config":".mcp.json","template":"codebuddy.mcp.json","node":"mcpServers","capture":"CLI project MCP; IDE automatic capture uses separate Hooks + VSIX setup"},
+    {"id":"cursor","executables":["cursor"],"config":".cursor/mcp.json","template":"cursor.mcp.json","node":"mcpServers","capture":"adapter CLI; explicit transcript opt-in"},
+    {"id":"gemini","executables":["gemini"],"config":".gemini/settings.json","template":"gemini.settings.json","node":"mcpServers","capture":"adapter CLI; explicit transcript opt-in"},
+    {"id":"opencode","executables":["opencode"],"config":"opencode.json","template":"opencode.json","node":"mcp","capture":"adapter CLI; explicit transcript opt-in"}
+  ],
+  "manual": [
+    {"id":"claude-desktop","reason":"Claude.app is distinct from Claude Code; use Desktop's official MCP/extension configuration."},
+    {"id":"codebuddy-ide","path":"integrations/codebuddy-extension","reason":"IDE uses the VSIX and scripts/setup-codebuddy-local.py Hooks; MCP can be imported through IDE Settings > MCP."},
+    {"id":"codex","path":"plugins/agent-continuity","reason":"Use the existing native plugin package and the host plugin installation entrypoint."},
+    {"id":"mobile-apps","reason":"iOS/Android third-party apps require supported remote MCP/OAuth or export; own apps embed Swift/Kotlin SDK."}
+  ]
+}

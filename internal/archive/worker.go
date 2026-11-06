@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/agent-continuity/agent-continuity-master/internal/artifact"
@@ -31,6 +32,7 @@ type Worker struct {
 	Targets   map[string]objectstore.Target
 	TempDir   string
 	Logger    *slog.Logger
+	connected atomic.Bool
 }
 
 func New(c Config, q Repository, events EventSource, artifacts *artifact.Service, tempDir string) (*Worker, error) {
@@ -54,7 +56,19 @@ func (w *Worker) ProcessJob(ctx context.Context, id int64) (bool, error) {
 	}
 	operation, cancel := context.WithTimeout(ctx, time.Duration(w.Config.TimeoutSeconds)*time.Second)
 	defer cancel()
-	receipt, code := w.upload(operation, *j)
+	var receipt Receipt
+	var code string
+	if j.Operation == "delete" {
+		if !w.Config.Lifecycle.AllowDelete {
+			code = "delete_disabled"
+		} else if p := w.Providers[j.TargetID]; p == nil {
+			code = "target_unconfigured"
+		} else if err := p.Delete(operation, j.ObjectKey); err != nil {
+			code = "delete_failed"
+		}
+	} else {
+		receipt, code = w.upload(operation, *j)
+	}
 	if code != "" {
 		// A stopped worker leaves its lease for recovery; never acknowledge with a cancelled context.
 		if ctx.Err() != nil {
@@ -63,6 +77,10 @@ func (w *Worker) ProcessJob(ctx context.Context, id int64) (bool, error) {
 		delay := time.Duration((1<<min(j.Attempts, 9))+int(j.ID%5)) * time.Second
 		return true, w.Queue.Fail(ctx, *j, code, w.Config.MaxAttempts, delay)
 	}
+	if j.Operation == "delete" {
+		return true, w.Queue.CompleteDelete(ctx, *j)
+	}
+	receipt.RetentionDays = w.Config.Lifecycle.MinimumRetentionDays
 	return true, w.Queue.Complete(ctx, *j, receipt)
 }
 

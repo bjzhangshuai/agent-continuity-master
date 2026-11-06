@@ -1,5 +1,5 @@
-// Package archive owns durable asynchronous content archival. Repository is the
-// queue boundary; another broker can implement it without changing cloud drivers.
+// Package archive owns durable asynchronous content archival. Repository holds
+// transactional outbox/receipts; JetStream is the broker, separate from providers.
 package archive
 
 import (
@@ -29,6 +29,13 @@ type Config struct {
 	MaxAttempts         int                  `json:"max_attempts"`
 	MaxPendingJobs      int                  `json:"max_pending_jobs"`
 	MaxStagingBytes     int64                `json:"max_staging_bytes"`
+	Lifecycle           LifecycleConfig      `json:"lifecycle"`
+}
+
+type LifecycleConfig struct {
+	AllowDelete          bool `json:"allow_delete"`
+	MinimumRetentionDays int  `json:"minimum_retention_days"`
+	CacheTTLSeconds      int  `json:"cache_ttl_seconds"`
 }
 
 func Parse(raw string) (Config, error) {
@@ -49,6 +56,9 @@ func Parse(raw string) (Config, error) {
 	}
 	if c.Concurrency < 1 || c.Concurrency > 32 {
 		return c, errors.New("archive concurrency must be 1..32")
+	}
+	if c.Lifecycle.MinimumRetentionDays < 0 || c.Lifecycle.MinimumRetentionDays > 36500 || (c.Lifecycle.CacheTTLSeconds != 0 && c.Lifecycle.CacheTTLSeconds < 3600) {
+		return c, errors.New("invalid lifecycle policy; automatic cache eviction requires at least one hour")
 	}
 	if c.PollSeconds < 1 || c.PollSeconds > 60 || c.TimeoutSeconds < 5 || c.TimeoutSeconds > 300 || c.MaxAttempts < 1 || c.MaxAttempts > 20 || c.MaxPendingJobs < 1 || c.MaxPendingJobs > 1000000 || c.MaxStagingBytes < 1<<20 {
 		return c, errors.New("archive worker limits are out of range")
@@ -75,31 +85,37 @@ func Parse(raw string) (Config, error) {
 }
 
 type Job struct {
-	ID             int64     `json:"id"`
-	TaskID         string    `json:"task_id"`
-	OrganizationID string    `json:"organization_id,omitempty"`
-	AccountID      string    `json:"account_id"`
-	Kind           string    `json:"kind"`
-	ResourceID     string    `json:"resource_id"`
-	VersionID      string    `json:"version_id,omitempty"`
-	TargetID       string    `json:"target_id"`
-	State          string    `json:"state"`
-	Attempts       int       `json:"attempts"`
-	LeaseVersion   int64     `json:"-"`
-	SourceRef      string    `json:"-"`
-	ContentType    string    `json:"content_type"`
-	ContentHash    string    `json:"content_hash,omitempty"`
-	Size           int64     `json:"size"`
-	ObjectKey      string    `json:"object_key,omitempty"`
-	ErrorCode      string    `json:"error_code,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	NextAttempt    time.Time `json:"next_attempt"`
+	ID             int64      `json:"id"`
+	TaskID         string     `json:"task_id"`
+	OrganizationID string     `json:"organization_id,omitempty"`
+	AccountID      string     `json:"account_id"`
+	Kind           string     `json:"kind"`
+	ResourceID     string     `json:"resource_id"`
+	VersionID      string     `json:"version_id,omitempty"`
+	TargetID       string     `json:"target_id"`
+	State          string     `json:"state"`
+	Attempts       int        `json:"attempts"`
+	LeaseVersion   int64      `json:"-"`
+	SourceRef      string     `json:"-"`
+	ContentType    string     `json:"content_type"`
+	ContentHash    string     `json:"content_hash,omitempty"`
+	Size           int64      `json:"size"`
+	ObjectKey      string     `json:"object_key,omitempty"`
+	ErrorCode      string     `json:"error_code,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	NextAttempt    time.Time  `json:"next_attempt"`
+	Operation      string     `json:"operation"`
+	StoredAt       *time.Time `json:"stored_at,omitempty"`
+	DeletedAt      *time.Time `json:"deleted_at,omitempty"`
+	RetainUntil    *time.Time `json:"retain_until,omitempty"`
+	LegalHold      bool       `json:"legal_hold"`
 }
 
 type Receipt struct {
-	Key, Hash string
-	Size      int64
+	Key, Hash     string
+	Size          int64
+	RetentionDays int
 }
 type Repository interface {
 	Configure(context.Context, Config) error
@@ -113,4 +129,19 @@ type Repository interface {
 	Retry(context.Context, int64) error
 	Backfill(context.Context, string, int) (int64, error)
 	FindArtifact(context.Context, string, string, string) (Job, error)
+	RequestDelete(context.Context, int64, string, string, string) error
+	CompleteDelete(context.Context, Job) error
+	SetHold(context.Context, int64, bool, string, string) error
+	RecordDownload(context.Context, Job, string) error
+	Stats(context.Context) (Stats, error)
+	Ping(context.Context) error
+	CacheCandidates(context.Context, time.Duration, int, []string) ([]Job, error)
+	PrepareCacheEviction(context.Context, string) (bool, error)
+	CompleteCacheEviction(context.Context, string) error
+}
+
+type Stats struct {
+	States               map[string]int64 `json:"states"`
+	RetainedBytes        int64            `json:"retained_bytes"`
+	OldestPendingSeconds float64          `json:"oldest_pending_seconds"`
 }

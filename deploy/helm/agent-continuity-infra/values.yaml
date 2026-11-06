@@ -1,0 +1,178 @@
+# Install in the application's namespace, or explicitly allow a client namespace.
+# This production profile needs >=3 nodes; do not apply it to Rancher Desktop.
+clientNamespaceLabels: {}
+nats:
+  enabled: true
+  fullnameOverride: continuity-nats
+  tlsCA: {enabled: true, secretName: continuity-nats-tls, key: ca.crt}
+  config:
+    cluster:
+      enabled: true
+      replicas: 3
+      tls: {enabled: true, secretName: continuity-nats-tls, merge: {verify: true}}
+    jetstream:
+      enabled: true
+      fileStore:
+        pvc: {enabled: true, size: 20Gi}
+        maxSize: 16Gi
+      memoryStore: {enabled: false}
+    nats:
+      tls: {enabled: true, secretName: continuity-nats-tls}
+    merge:
+      authorization:
+        token: << $CONTINUITY_NATS_TOKEN >>
+  container:
+    env:
+      GOMEMLIMIT: 768MiB
+      GOMAXPROCS: "2"
+      CONTINUITY_NATS_TOKEN:
+        valueFrom: {secretKeyRef: {name: continuity-nats-auth, key: token}}
+    resources:
+      requests: {cpu: 250m, memory: 256Mi}
+      limits: {cpu: "2", memory: 1Gi}
+    merge:
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+  reloader: {enabled: false}
+  natsBox: {enabled: false}
+  podTemplate:
+    configChecksumAnnotation: true
+    merge:
+      spec:
+        automountServiceAccountToken: false
+        securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, seccompProfile: {type: RuntimeDefault}}
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {app.kubernetes.io/name: nats}
+
+# Local test store only. Existing production object stores remain externally managed.
+minio:
+  enabled: false
+  fullnameOverride: continuity-minio
+  mode: standalone
+  replicas: 1
+  image: {repository: minio/minio, tag: RELEASE.2025-09-07T16-13-09Z, pullPolicy: IfNotPresent}
+  existingSecret: continuity-minio-root
+  tls: {enabled: true, certSecret: continuity-minio-tls}
+  trustedCertsSecret: ""
+  deploymentUpdate: {type: Recreate}
+  persistence:
+    size: 2Gi
+    annotations: {helm.sh/resource-policy: keep}
+  users: [] # Never install the upstream chart's default console/console123 user.
+  buckets: [] # Our bounded, least-privilege bootstrap Job owns provisioning.
+  policies: []
+  serviceAccount: {create: true, name: continuity-minio}
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+  environment: {GOMAXPROCS: "2", GOMEMLIMIT: 384MiB}
+  securityContext: {enabled: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, fsGroupChangePolicy: OnRootMismatch}
+  containerSecurityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+  extraVolumes: [{name: tmp, emptyDir: {sizeLimit: 16Mi}}]
+  extraVolumeMounts: [{name: tmp, mountPath: /tmp}]
+  networkPolicy: {enabled: false} # Parent chart applies narrowly scoped ingress/egress.
+  ingress: {enabled: false}
+  consoleIngress: {enabled: false}
+  metrics: {serviceMonitor: {enabled: false, public: false}}
+minioBootstrap:
+  # Helm generates random credentials + a local CA once, then reuses existing Secrets.
+  # GitOps/production: false and supply all three Secrets through your secret manager.
+  manageSecrets: false
+  clientSecret: continuity-minio-client
+  bucket: continuity-archive
+  prefix: continuity
+  quota: 256MiB
+  image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {cpu: 250m, memory: 128Mi}
+
+# These controllers are cluster-scoped: opt in only after checking for an existing installation.
+# No optional monitoring/trace/autoscaling Pods are installed by the dev profile.
+monitoring:
+  enabled: false
+  fullnameOverride: continuity-monitoring
+  defaultRules: {create: false}
+  nodeExporter: {enabled: false}
+  kubeEtcd: {enabled: false}
+  kubeControllerManager: {enabled: false}
+  kubeScheduler: {enabled: false}
+  kubeProxy: {enabled: false}
+  alertmanager: {enabled: false}
+  prometheusOperator:
+    resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {cpu: 500m, memory: 256Mi}}
+    admissionWebhooks:
+      patch:
+        resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 250m, memory: 128Mi}}
+  prometheus:
+    prometheusSpec:
+      retention: 24h
+      retentionSize: 1GB
+      serviceMonitorSelectorNilUsesHelmValues: false
+      serviceMonitorSelector: {matchLabels: {app.kubernetes.io/part-of: agent-continuity}}
+      serviceMonitorNamespaceSelector: {matchLabels: {continuity.agent-continuity.io/monitor: "true"}}
+      ruleSelectorNilUsesHelmValues: false
+      ruleSelector: {matchLabels: {app.kubernetes.io/part-of: agent-continuity}}
+      ruleNamespaceSelector: {matchLabels: {continuity.agent-continuity.io/monitor: "true"}}
+      resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 768Mi}}
+      storageSpec:
+        volumeClaimTemplate:
+          spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 2Gi}}}
+  grafana:
+    enabled: true
+    admin: {existingSecret: continuity-grafana-admin, userKey: admin-user, passwordKey: admin-password}
+    resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {cpu: 500m, memory: 256Mi}}
+    persistence: {enabled: true, size: 1Gi}
+    sidecar:
+      resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 250m, memory: 128Mi}}
+    additionalDataSources:
+      - {name: Tempo, type: tempo, url: "http://continuity-tempo:3200", access: proxy, uid: continuity-tempo}
+  kube-state-metrics:
+    resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 250m, memory: 128Mi}}
+keda:
+  enabled: false
+  resources:
+    operator: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 500m, memory: 256Mi}}
+    metricServer: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 500m, memory: 256Mi}}
+    webhooks: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 250m, memory: 128Mi}}
+otel:
+  enabled: false
+  fullnameOverride: continuity-otel
+  mode: deployment
+  replicaCount: 1
+  image: {repository: otel/opentelemetry-collector-contrib}
+  command: {name: otelcol-contrib}
+  resources: {requests: {cpu: 25m, memory: 64Mi}, limits: {cpu: 250m, memory: 128Mi}}
+  ports:
+    jaeger-compact: {enabled: false}
+    jaeger-thrift: {enabled: false}
+    jaeger-grpc: {enabled: false}
+    zipkin: {enabled: false}
+  config:
+    receivers: {jaeger: null, zipkin: null, prometheus: null}
+    exporters:
+      debug: null
+      otlp/tempo: {endpoint: "continuity-tempo:4317", tls: {insecure: true}}
+    processors:
+      memory_limiter: {check_interval: 1s, limit_mib: 96, spike_limit_mib: 24}
+      batch: {timeout: 2s, send_batch_size: 512}
+    service:
+      pipelines:
+        logs: null
+        metrics: null
+        traces: {receivers: [otlp], processors: [memory_limiter, batch], exporters: [otlp/tempo]}
+tempo:
+  enabled: false
+  fullnameOverride: continuity-tempo
+  persistence: {enabled: true, size: 2Gi}
+  tempo:
+    retention: 24h
+    resources: {requests: {cpu: 25m, memory: 64Mi}, limits: {cpu: 250m, memory: 256Mi}}
+    receivers:
+      otlp:
+        protocols:
+          grpc: {endpoint: "0.0.0.0:4317"}
+          http: {endpoint: "0.0.0.0:4318"}

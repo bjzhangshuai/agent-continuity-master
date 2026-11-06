@@ -1,0 +1,9 @@
+# Optional overlay on the infrastructure chart, NOT for the local dev install.
+# Requires explicit approval to install cluster-scoped Prometheus/KEDA controllers.
+# Reuse existing controllers instead when present. This is a bounded baseline,
+# not a workload-sized HA observability configuration.
+monitoring: {enabled: true}
+keda: {enabled: true}
+otel: {enabled: true}
+tempo: {enabled: true}
+minio: {enabled: false}

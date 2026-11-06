@@ -93,11 +93,45 @@ type BillingEvent struct {
 // An invoice is the transactional aggregate. CAS commits payment state, receipts
 // and its audit trail atomically. Indexed routing columns live in separate tables.
 type BillingDocument struct {
-	Invoice  BillingInvoice   `json:"invoice"`
-	Payments []BillingPayment `json:"payments"`
-	Receipts []PaymentReceipt `json:"receipts"`
-	Events   []BillingEvent   `json:"events"`
-	Version  int64            `json:"version"`
+	Refunds     []BillingRefund  `json:"refunds"`
+	CreditNotes []CreditNote     `json:"credit_notes"`
+	Invoice     BillingInvoice   `json:"invoice"`
+	Payments    []BillingPayment `json:"payments"`
+	Receipts    []PaymentReceipt `json:"receipts"`
+	Events      []BillingEvent   `json:"events"`
+	Version     int64            `json:"version"`
+}
+
+// Refunds are immutable requests; amounts are reserved until conclusively failed
+// or rejected. They share the invoice CAS transaction with their credit notes.
+type BillingRefund struct {
+	ID               string     `json:"refund_id"`
+	PaymentID        string     `json:"payment_id"`
+	AmountMinor      int64      `json:"amount_minor"`
+	Currency         string     `json:"currency"`
+	Reason           string     `json:"reason"`
+	Status           string     `json:"status"`
+	RequestedBy      string     `json:"requested_by"`
+	DecidedBy        string     `json:"decided_by,omitempty"`
+	DecisionReason   string     `json:"decision_reason,omitempty"`
+	IdempotencyKey   string     `json:"idempotency_key"`
+	ProviderRefundID string     `json:"provider_refund_id,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	SubmittedAt      *time.Time `json:"submitted_at,omitempty"`
+	LastCheckedAt    *time.Time `json:"last_checked_at,omitempty"`
+	CheckAttempts    int        `json:"check_attempts"`
+	LastError        string     `json:"last_error,omitempty"`
+}
+
+type CreditNote struct {
+	ID          string    `json:"credit_note_id"`
+	RefundID    string    `json:"refund_id"`
+	PaymentID   string    `json:"payment_id"`
+	AmountMinor int64     `json:"amount_minor"`
+	Currency    string    `json:"currency"`
+	CreatedAt   time.Time `json:"created_at"`
+	Kind        string    `json:"kind"`
 }
 
 type PaymentReconcileTarget struct {

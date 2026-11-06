@@ -24,8 +24,10 @@ import (
 	"github.com/agent-continuity/agent-continuity-master/internal/archive"
 	"github.com/agent-continuity/agent-continuity-master/internal/artifact"
 	"github.com/agent-continuity/agent-continuity-master/internal/auth"
+	"github.com/agent-continuity/agent-continuity-master/internal/billing"
 	"github.com/agent-continuity/agent-continuity-master/internal/httpapi"
 	"github.com/agent-continuity/agent-continuity-master/internal/objectstore"
+	"github.com/agent-continuity/agent-continuity-master/internal/payments"
 	pgstore "github.com/agent-continuity/agent-continuity-master/internal/storage/postgres"
 	"github.com/agent-continuity/agent-continuity-master/pkg/client"
 	"github.com/agent-continuity/agent-continuity-master/pkg/protocol"
@@ -76,6 +78,7 @@ func TestArchiveJetStreamTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := store.ArchiveQueue()
+	config.Lifecycle.AllowDelete = true // test-owned objects only
 	config.DefaultTarget = fmt.Sprintf("archive-test-%d", time.Now().UnixNano())
 	config.Targets[0].ID = config.DefaultTarget
 	if err = q.Configure(ctx, config); err != nil {
@@ -248,6 +251,82 @@ func TestArchiveJetStreamTransaction(t *testing.T) {
 	if worked, err := worker.ProcessJob(ctx, artifactJob.ID); err != nil || worked {
 		t.Fatalf("duplicate delivery must be a no-op: %v", err)
 	}
+	// Archive, retained byte-hours and verified origin reads enter the SAME invoice
+	// pipeline as existing usage, followed by idempotent simulated payment receipts.
+	if _, err = sql.Exec(ctx, `UPDATE archive_jobs SET stored_at=now()-interval '2 hours' WHERE job_id=$1`, artifactJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	from, to := time.Now().Add(-3*time.Hour), time.Now()
+	ba := protocol.BillingAccount{ID: newID("billing"), AccountID: account.ID, OrganizationID: org.ID, Currency: "CNY", Status: "active", Plan: "pro", CreatedAt: now, Limits: json.RawMessage(`{}`)}
+	if err = store.PutBillingAccount(ctx, ba); err != nil {
+		t.Fatal(err)
+	}
+	book := billing.DemoPriceBook()
+	if err = book.ValidateArchiveRates(); err != nil {
+		t.Fatal(err)
+	}
+	for i := range book.Currencies["CNY"] {
+		book.Currencies["CNY"][i].UnitPriceMinor = 1
+	}
+	bs := billing.New(store, payments.NewRegistry(payments.Demo{}), book, api.URL, []byte(strings.Repeat("b", 32)))
+	bill, err := bs.Issue(ctx, ba, from, to, newID("invoice"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	meters := map[string]int64{}
+	for _, line := range bill.Invoice.Lines {
+		meters[line.Metric] = line.Quantity
+	}
+	if meters["storage.archive.bytes"] <= 0 || meters["storage.download.bytes"] != int64(len(payload)) || meters["storage.retained.byte_hours"] < int64(2*len(payload)) {
+		t.Fatalf("missing storage bill meters: %+v", meters)
+	}
+	bill, paymentID, err := bs.CreatePayment(ctx, account.ID, bill.Invoice.ID, "demo", newID("checkout"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		bill, err = bs.Simulate(ctx, account.ID, bill.Invoice.ID, paymentID, "succeeded")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if bill.Invoice.Status != "paid" || len(bill.Receipts) != 1 {
+		t.Fatal("archive invoice failed to settle exactly once")
+	}
+	if _, err = sql.Exec(ctx, `UPDATE archive_jobs SET stored_at=now() WHERE job_id=$1`, artifactJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Opt-in cache eviction verifies remote content and never races archive-only
+	// deletion. A subsequent SDK download must transparently fall back to cloud.
+	cachePayload := []byte("unique cache lifecycle test")
+	cached, err := sdk.UploadContent(ctx, task.ID, "cache-candidate", "v1", "cache.txt", "text/plain", cachePayload, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cj, err := q.FindArtifact(ctx, task.ID, cached.ID, "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = worker.ProcessJob(ctx, cj.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = sql.Exec(ctx, `UPDATE archive_jobs SET stored_at=now()-interval '2 hours' WHERE job_id=$1`, cj.ID); err != nil {
+		t.Fatal(err)
+	}
+	worker.Config.Lifecycle.CacheTTLSeconds = 3600
+	if n, err := worker.EvictCacheOnce(ctx); err != nil || n != 1 {
+		t.Fatalf("cache eviction %d: %v", n, err)
+	}
+	if _, err = local.Open(cached.StorageRef); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cache not evicted: %v", err)
+	}
+	if err = q.RequestDelete(ctx, cj.ID, cached.ContentHash, account.ID, "test deletion of archive copy"); !errors.Is(err, archive.ErrLeaseLost) {
+		t.Fatal("last durable copy deletion was allowed")
+	}
+	restored.Reset()
+	if _, err = sdk.DownloadArtifact(ctx, task.ID, cached.ID, &restored, 0); err != nil || !bytes.Equal(restored.Bytes(), cachePayload) {
+		t.Fatal("post-eviction readback failed", err)
+	}
 	// Lease fencing: a worker which timed out cannot acknowledge a newer attempt.
 	ref, _, err := local.Put(bytes.NewReader(payload), protocol.Digest(payload))
 	if err != nil {
@@ -291,8 +370,79 @@ func TestArchiveJetStreamTransaction(t *testing.T) {
 	if worked, err := worker.ProcessJob(ctx, j.ID); !worked || err != nil {
 		t.Fatalf("dead letter replay: %v", err)
 	}
+	j, _ = q.Get(ctx, j.ID)
+	if err = q.SetHold(ctx, j.ID, true, account.ID, "test legal retention lock"); err != nil {
+		t.Fatal(err)
+	}
+	if err = q.RequestDelete(ctx, j.ID, j.ContentHash, account.ID, "test owned copy deletion"); !errors.Is(err, archive.ErrLeaseLost) {
+		t.Fatal("legal hold bypassed")
+	}
+	if err = q.SetHold(ctx, j.ID, false, account.ID, "test release retention lock"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = sql.Exec(ctx, `UPDATE archive_jobs SET retain_until=now()+interval '1 day' WHERE job_id=$1`, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = q.RequestDelete(ctx, j.ID, j.ContentHash, account.ID, "test owned copy deletion"); !errors.Is(err, archive.ErrLeaseLost) {
+		t.Fatal("minimum retention bypassed")
+	}
+	if _, err = sql.Exec(ctx, `UPDATE archive_jobs SET retain_until=now()-interval '1 day' WHERE job_id=$1`, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err = sdk.Do(ctx, "POST", fmt.Sprintf("/v1/tasks/%s/storage-jobs/%d/delete", task.ID, j.ID), map[string]string{"confirm_hash": j.ContentHash, "reason": "delete integration test owned copy"}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = worker.ProcessJob(ctx, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	j, _ = q.Get(ctx, j.ID)
+	if j.State != "deleted" || j.DeletedAt == nil {
+		t.Fatal("delete receipt missing")
+	}
+	if _, err = worker.Providers[j.TargetID].Get(ctx, j.ObjectKey); err == nil {
+		t.Fatal("deleted test object remains")
+	}
+	if err = sql.QueryRow(ctx, `SELECT count(*) FROM archive_action_audit WHERE job_id=$1 AND action='delete.completed'`, j.ID).Scan(&count); err != nil || count != 1 {
+		t.Fatal("deletion audit missing")
+	}
+	metrics := httptest.NewRecorder()
+	worker.HealthHandler().ServeHTTP(metrics, httptest.NewRequest("GET", "/metrics", nil))
+	if metrics.Code != 200 || !strings.Contains(metrics.Body.String(), "continuity_archive_retained_bytes") {
+		t.Fatal("worker metrics unavailable")
+	}
+	// Recover from total broker data loss using the database outbox, not only a
+	// server restart on the same disk. This replaces only the test-owned NATS store.
+	recovery, err := sdk.UploadContent(ctx, task.ID, "broker-recovery", "v1", "recovery.txt", "text/plain", []byte("recover a lost broker"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rj, err := q.FindArtifact(ctx, task.ID, recovery.ID, "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = q.MarkDispatched(ctx, rj); err != nil {
+		t.Fatal(err)
+	}
+	ns.Shutdown()
+	ns.WaitForShutdown()
+	opts.StoreDir = t.TempDir()
+	ns = start()
+	if _, err = sql.Exec(ctx, `UPDATE archive_jobs SET dispatched_at=now()-interval '31 seconds' WHERE job_id=$1`, rj.ID); err != nil {
+		t.Fatal(err)
+	}
+	recoveryCtx, stopRecovery := context.WithCancel(ctx)
+	recoveryDone := make(chan struct{})
+	go func() { defer close(recoveryDone); worker.Run(recoveryCtx) }()
+	_, waitErr := sdk.WaitStorageJob(ctx, task.ID, rj.ID, 15*time.Second)
+	stopRecovery()
+	<-recoveryDone
+	if waitErr != nil {
+		t.Fatal("broker disaster recovery", waitErr)
+	}
 	// Queue backpressure must roll back the source and its outbox atomically.
-	_, err = sql.Exec(ctx, `UPDATE archive_control SET max_pending=1+(SELECT count(*) FROM archive_jobs WHERE state<>'stored') WHERE singleton`)
+	_, err = sql.Exec(ctx, `UPDATE archive_control SET max_pending=1+(SELECT count(*) FROM archive_jobs WHERE state NOT IN ('stored','deleted')) WHERE singleton`)
 	if err != nil {
 		t.Fatal(err)
 	}

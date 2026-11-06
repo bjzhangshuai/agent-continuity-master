@@ -205,14 +205,14 @@ func (s *Store) CreateTask(ctx context.Context, task protocol.Task) error {
 }
 
 func (s *Store) GetTask(ctx context.Context, id string) (protocol.Task, error) {
-	return scanTask(s.pool.QueryRow(ctx, `SELECT task_id,account_id,COALESCE(organization_id,''),COALESCE(team_id,''),title,objective,status,COALESCE(origin_device,''),head_event_ids,metadata,created_at,updated_at FROM tasks WHERE task_id=$1`, id))
+	return scanTask(s.pool.QueryRow(ctx, `SELECT task_id,account_id,COALESCE(organization_id,''),COALESCE(team_id,''),title,objective,status,COALESCE(origin_device,''),head_event_ids,(SELECT count(*) FROM events WHERE task_id=tasks.task_id),(SELECT count(*) FROM artifacts WHERE task_id=tasks.task_id),metadata,created_at,updated_at FROM tasks WHERE task_id=$1`, id))
 }
 
 func (s *Store) ListTasks(ctx context.Context, accountID string, limit int) ([]protocol.Task, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
-	rows, err := s.pool.Query(ctx, `SELECT DISTINCT t.task_id,t.account_id,COALESCE(t.organization_id,''),COALESCE(t.team_id,''),t.title,t.objective,t.status,COALESCE(t.origin_device,''),t.head_event_ids,t.metadata,t.created_at,t.updated_at FROM tasks t LEFT JOIN permissions p ON p.task_id=t.task_id AND p.account_id=$1 LEFT JOIN organization_members om ON om.organization_id=t.organization_id AND om.account_id=$1 AND om.status='active' LEFT JOIN team_members tm ON tm.team_id=t.team_id AND tm.account_id=$1 AND tm.status='active' WHERE p.account_id IS NOT NULL OR (om.account_id IS NOT NULL AND (t.team_id IS NULL OR om.role IN ('owner','admin') OR tm.account_id IS NOT NULL)) ORDER BY t.updated_at DESC LIMIT $2`, accountID, limit)
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT t.task_id,t.account_id,COALESCE(t.organization_id,''),COALESCE(t.team_id,''),t.title,t.objective,t.status,COALESCE(t.origin_device,''),t.head_event_ids,(SELECT count(*) FROM events WHERE task_id=t.task_id),(SELECT count(*) FROM artifacts WHERE task_id=t.task_id),t.metadata,t.created_at,t.updated_at FROM tasks t LEFT JOIN permissions p ON p.task_id=t.task_id AND p.account_id=$1 LEFT JOIN organization_members om ON om.organization_id=t.organization_id AND om.account_id=$1 AND om.status='active' LEFT JOIN team_members tm ON tm.team_id=t.team_id AND tm.account_id=$1 AND tm.status='active' WHERE p.account_id IS NOT NULL OR (om.account_id IS NOT NULL AND (t.team_id IS NULL OR om.role IN ('owner','admin') OR tm.account_id IS NOT NULL)) ORDER BY t.updated_at DESC LIMIT $2`, accountID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ type rowScanner interface{ Scan(...any) error }
 func scanTask(row rowScanner) (protocol.Task, error) {
 	var value protocol.Task
 	var heads, metadata []byte
-	err := row.Scan(&value.ID, &value.AccountID, &value.OrganizationID, &value.TeamID, &value.Title, &value.Objective, &value.Status, &value.OriginDevice, &heads, &metadata, &value.CreatedAt, &value.UpdatedAt)
+	err := row.Scan(&value.ID, &value.AccountID, &value.OrganizationID, &value.TeamID, &value.Title, &value.Objective, &value.Status, &value.OriginDevice, &heads, &value.EventCount, &value.ArtifactCount, &metadata, &value.CreatedAt, &value.UpdatedAt)
 	if err != nil {
 		return protocol.Task{}, mapError(err)
 	}

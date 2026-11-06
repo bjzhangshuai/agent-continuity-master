@@ -185,6 +185,23 @@ func (w *Worker) RelayOnce(ctx context.Context, b *JetStream) error {
 	return nil
 }
 func (w *Worker) Run(ctx context.Context) {
+	maintenanceDone := make(chan struct{})
+	go func() {
+		defer close(maintenanceDone)
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if _, err := w.EvictCacheOnce(ctx); err != nil {
+					w.Logger.Warn("archive cache maintenance deferred", "error", err)
+				}
+			}
+		}
+	}()
+	defer func() { <-maintenanceDone }()
 	for ctx.Err() == nil {
 		b, err := ConnectBroker(w.Config.Broker, time.Duration(w.Config.TimeoutSeconds)*time.Second)
 		if err != nil {
@@ -200,9 +217,12 @@ func (w *Worker) Run(ctx context.Context) {
 	}
 }
 func (w *Worker) runConnected(ctx context.Context, b *JetStream) {
+	w.connected.Store(true)
+	defer w.connected.Store(false)
 	var group sync.WaitGroup
 	group.Go(func() {
 		for ctx.Err() == nil {
+			w.connected.Store(b.connection.IsConnected())
 			if err := w.RelayOnce(ctx, b); err != nil && ctx.Err() == nil {
 				w.Logger.Warn("archive outbox publish deferred")
 			}
@@ -230,7 +250,7 @@ func (w *Worker) runConnected(ctx context.Context, b *JetStream) {
 					worked, err := w.ProcessJob(ctx, id)
 					if err == nil && !worked {
 						j, getErr := w.Queue.Get(ctx, id)
-						if errors.Is(getErr, ErrNotFound) || (getErr == nil && (j.State == "stored" || j.State == "dead")) {
+						if errors.Is(getErr, ErrNotFound) || (getErr == nil && (j.State == "stored" || j.State == "dead" || j.State == "deleted")) {
 							_ = m.AckSync()
 							continue
 						}

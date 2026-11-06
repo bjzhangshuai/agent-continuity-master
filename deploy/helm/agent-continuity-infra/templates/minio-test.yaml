@@ -1,0 +1,53 @@
+{{- if .Values.minio.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Release.Name }}-minio-test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+  labels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: minio-bootstrap}
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  activeDeadlineSeconds: 90
+  securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: roundtrip
+      image: {{ .Values.minioBootstrap.image | quote }}
+      resources: {{- toYaml .Values.minioBootstrap.resources | nindent 8 }}
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+      env: [{name: MC_CONFIG_DIR, value: /tmp/mc}, {name: GOMAXPROCS, value: "2"}, {name: GOMEMLIMIT, value: 96MiB}]
+      command: [/bin/sh, -ec]
+      args:
+        - |
+          mkdir -p /tmp/mc/certs/CAs
+          cp /client-auth/ca.crt /tmp/mc/certs/CAs/ca.crt
+          mc alias set archive https://{{ .Values.minio.fullnameOverride }}:9000 "$(cat /client-auth/access-key)" "$(cat /client-auth/secret-key)" --api S3v4 >/dev/null
+          key="{{ .Values.minioBootstrap.prefix }}/diagnostics/helm-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          target="archive/{{ .Values.minioBootstrap.bucket }}/$key"
+          trap 'mc rm "$target" >/dev/null' EXIT
+          printf '%s' 'MinIO private S3 roundtrip test' > /tmp/source
+          # A new test Pod can precede CNI/Service rule convergence. Retry only
+          # this owned, idempotent test key with a bounded startup budget.
+          attempt=0
+          until mc cp /tmp/source "$target" >/dev/null; do
+            attempt=$((attempt+1))
+            test "$attempt" -lt 15 || exit 1
+            sleep 2
+          done
+          mc cat "$target" > /tmp/result
+          test "$(sha256sum /tmp/source | cut -d ' ' -f 1)" = "$(sha256sum /tmp/result | cut -d ' ' -f 1)"
+          if mc admin info archive >/dev/null 2>&1; then echo 'FAIL: archive identity has administrative access'; exit 1; fi
+          mc rm "$target" >/dev/null
+          trap - EXIT
+          if mc stat "$target" >/dev/null 2>&1; then echo 'FAIL: deleted test object remains'; exit 1; fi
+          echo 'PASS: TLS, private S3 PUT/GET/hash/DELETE and administrative access denied.'
+      volumeMounts:
+        - {name: tmp, mountPath: /tmp}
+        - {name: client-auth, mountPath: /client-auth, readOnly: true}
+  volumes:
+    - {name: tmp, emptyDir: {sizeLimit: 16Mi}}
+    - name: client-auth
+      secret: {secretName: {{ .Values.minioBootstrap.clientSecret }}, defaultMode: 0440}
+{{- end }}

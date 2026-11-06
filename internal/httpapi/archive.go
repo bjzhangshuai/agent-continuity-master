@@ -69,7 +69,7 @@ func (s *Server) archiveConfig(w http.ResponseWriter, r *http.Request) {
 	for _, t := range s.archive.Config.Targets {
 		targets = append(targets, map[string]string{"id": t.ID, "provider": t.Provider})
 	}
-	writeJSON(w, 200, map[string]any{"enabled": s.archive.Config.Enabled, "queue": "nats-jetstream", "consistency": "transactional-outbox-at-least-once-idempotent", "targets": targets, "replicas": s.archive.Config.Broker.Replicas, "concurrency_per_worker": s.archive.Config.Concurrency, "max_attempts": s.archive.Config.MaxAttempts, "max_staging_bytes": s.archive.Config.MaxStagingBytes})
+	writeJSON(w, 200, map[string]any{"enabled": s.archive.Config.Enabled, "queue": "nats-jetstream", "consistency": "transactional-outbox-at-least-once-idempotent", "targets": targets, "replicas": s.archive.Config.Broker.Replicas, "concurrency_per_worker": s.archive.Config.Concurrency, "max_attempts": s.archive.Config.MaxAttempts, "max_staging_bytes": s.archive.Config.MaxStagingBytes, "lifecycle": s.archive.Config.Lifecycle})
 }
 func (s *Server) archiveAvailable(w http.ResponseWriter) bool {
 	if s.archive == nil {
@@ -192,6 +192,14 @@ func (s *Server) downloadStorageJob(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 	defer os.Remove(f.Name())
+	downloadID, err := protocol.NewID("archive_download")
+	if err == nil {
+		err = s.archive.Queue.RecordDownload(r.Context(), j, downloadID)
+	}
+	if err != nil {
+		writeError(w, 503, "meter_unavailable", "Download metering unavailable; retry later")
+		return
+	}
 	w.Header().Set("Content-Type", j.ContentType)
 	w.Header().Set("Content-Disposition", `attachment; filename="archive-content"`)
 	w.Header().Set("Cache-Control", "private, no-store")
@@ -212,5 +220,83 @@ func (s *Server) openArtifactContent(r *http.Request, a protocol.Artifact) (*os.
 		return nil, false, err
 	}
 	f, err := s.archive.Download(r.Context(), j)
+	if err == nil {
+		id, e := protocol.NewID("archive_download")
+		if e == nil {
+			e = s.archive.Queue.RecordDownload(r.Context(), j, id)
+		}
+		if e != nil {
+			f.Close()
+			os.Remove(f.Name())
+			return nil, false, e
+		}
+	}
 	return f, true, err
+}
+
+func (s *Server) deleteStorageJob(w http.ResponseWriter, r *http.Request) {
+	j, ok := s.storageJob(w, r, protocol.PermissionAdmin)
+	if !ok {
+		return
+	}
+	if !s.archive.Config.Lifecycle.AllowDelete {
+		writeError(w, 409, "delete_disabled", "Operator has not enabled archive deletion")
+		return
+	}
+	var in struct {
+		ConfirmHash string `json:"confirm_hash"`
+		Reason      string `json:"reason"`
+	}
+	if !s.decodeJSON(w, r, &in) {
+		return
+	}
+	if in.ConfirmHash != j.ContentHash || len(strings.TrimSpace(in.Reason)) < 8 || len(in.Reason) > 500 {
+		writeError(w, 400, "confirmation_required", "Exact content hash and a reason (8..500 characters) required")
+		return
+	}
+	c, ok := s.authorizeTask(w, r, protocol.PermissionAdmin)
+	if !ok {
+		return
+	}
+	if err := s.archive.Queue.RequestDelete(r.Context(), j.ID, in.ConfirmHash, c.AccountID, in.Reason); err != nil {
+		writeError(w, 409, "archive_protected", "State changed, retention/hold active, or archive is required after local cache release")
+		return
+	}
+	current, err := s.archive.Queue.Get(r.Context(), j.ID)
+	if err != nil {
+		writeInternal(w, err)
+		return
+	}
+	writeJSON(w, 202, map[string]any{"id": j.ID, "operation": "delete", "state": current.State, "scope": "archive-current-object-only"})
+}
+
+func (s *Server) holdStorageJob(w http.ResponseWriter, r *http.Request) {
+	j, ok := s.storageJob(w, r, protocol.PermissionAdmin)
+	if !ok {
+		return
+	}
+	c, ok := s.authorizeTask(w, r, protocol.PermissionAdmin)
+	if !ok {
+		return
+	}
+	var in struct {
+		Hold   bool   `json:"hold"`
+		Reason string `json:"reason"`
+	}
+	if !s.decodeJSON(w, r, &in) {
+		return
+	}
+	if len(strings.TrimSpace(in.Reason)) < 8 || len(in.Reason) > 500 {
+		writeError(w, 400, "reason_required", "Reason must be 8..500 characters")
+		return
+	}
+	if !in.Hold && !s.superAdmin(c) {
+		writeError(w, 403, "platform_admin_required", "Only a platform super administrator can release a hold")
+		return
+	}
+	if err := s.archive.Queue.SetHold(r.Context(), j.ID, in.Hold, c.AccountID, in.Reason); err != nil {
+		writeError(w, 409, "state_conflict", "A deletion is already in progress or the object is unavailable")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": j.ID, "legal_hold": in.Hold})
 }

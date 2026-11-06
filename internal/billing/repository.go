@@ -20,6 +20,7 @@ type Repository interface {
 	ListBills(context.Context, string, int) ([]protocol.BillingDocument, error)
 	FindPayment(context.Context, string, string) (protocol.BillingDocument, error)
 	DuePayments(context.Context, time.Time, int) ([]protocol.PaymentReconcileTarget, error)
+	DueRefunds(context.Context, time.Time, int) ([]protocol.PaymentReconcileTarget, error)
 }
 
 func SameRequest(a, b protocol.BillingInvoice) bool {

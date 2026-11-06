@@ -14,6 +14,18 @@ spec:
     - ports:
         - {protocol: TCP, port: 8080}
   egress:
+    {{- with .Values.networkPolicy.objectStoragePeers }}
+    - to: {{- toYaml . | nindent 8 }}
+      ports: [{protocol: TCP, port: {{ $.Values.networkPolicy.objectStoragePort }}}]
+    {{- end }}
+    {{- with .Values.networkPolicy.otlpPeers }}
+    - to: {{- toYaml . | nindent 8 }}
+      ports: [{protocol: TCP, port: 4318}]
+    {{- end }}
+    {{- with .Values.networkPolicy.databasePeers }}
+    - to: {{- toYaml . | nindent 8 }}
+      ports: [{protocol: TCP, port: 5432}]
+    {{- end }}
     - to:
         - podSelector:
             matchLabels:
@@ -72,4 +84,57 @@ spec:
       ports:
         - {protocol: UDP, port: 53}
         - {protocol: TCP, port: 53}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.archive.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "agent-continuity.fullname" . }}-archive-worker
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: archive-worker}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {{- toYaml .Values.networkPolicy.monitoringNamespaceLabels | nindent 14 }}
+      ports: [{protocol: TCP, port: 8081}]
+  egress:
+    {{- with .Values.networkPolicy.objectStoragePeers }}
+    - to: {{- toYaml . | nindent 8 }}
+      ports: [{protocol: TCP, port: {{ $.Values.networkPolicy.objectStoragePort }}}]
+    {{- end }}
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: database}
+      ports: [{protocol: TCP, port: 5432}]
+    {{- with .Values.networkPolicy.databasePeers }}
+    - to: {{- toYaml . | nindent 8 }}
+      ports: [{protocol: TCP, port: 5432}]
+    {{- end }}
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: archive-broker}
+      ports: [{protocol: TCP, port: 4222}]
+    {{- with .Values.networkPolicy.brokerPeers }}
+    - to: {{- toYaml . | nindent 8 }}
+      ports: [{protocol: TCP, port: 4222}]
+    {{- end }}
+    {{- range .Values.networkPolicy.externalEgress }}
+    - to:
+        - ipBlock:
+            cidr: {{ .cidr | quote }}
+            {{- with .except }}
+            except: {{- toYaml . | nindent 14 }}
+            {{- end }}
+      ports:
+        {{- range .ports }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    {{- end }}
 {{- end }}

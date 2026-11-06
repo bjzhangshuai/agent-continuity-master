@@ -31,6 +31,9 @@ type Object struct {
 type Provider interface {
 	Put(context.Context, Object, io.Reader) error
 	Get(context.Context, string) (io.ReadCloser, error)
+	// Delete removes one current object key, never a prefix/bucket. Versioned
+	// buckets retain noncurrent versions according to the operator's policy.
+	Delete(context.Context, string) error
 }
 
 type Target struct {
@@ -51,11 +54,16 @@ type Target struct {
 	SessionTokenFile string `json:"session_token_file,omitempty"`
 	PathStyle        bool   `json:"path_style,omitempty"`
 	AllowHTTP        bool   `json:"allow_http,omitempty"`
+	// CAFile adds a private CA for S3-compatible stores, without disabling TLS verification.
+	CAFile string `json:"ca_file,omitempty"`
 }
 
 var identifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 func (t Target) Validate() error {
+	if t.CAFile != "" && ((t.Provider != "s3" && t.Provider != "aws") || !filepath.IsAbs(t.CAFile)) {
+		return errors.New("ca_file requires an absolute file path and an S3-compatible provider")
+	}
 	if !identifier.MatchString(t.ID) {
 		return errors.New("invalid object storage target ID")
 	}
@@ -107,6 +115,7 @@ func (t Target) Identity() string {
 	t.MaxBytes = 0 // Capacity changes do not change physical destination.
 	t.AccessKey, t.SecretKey, t.SessionToken = "", "", ""
 	t.AccessKeyFile, t.SecretKeyFile, t.SessionTokenFile = "", "", ""
+	t.CAFile = "" // Trust bundle rotation does not move objects.
 	b, _ := json.Marshal(t)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])

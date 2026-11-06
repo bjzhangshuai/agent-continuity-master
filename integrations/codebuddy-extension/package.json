@@ -1,0 +1,28 @@
+{
+  "name": "agent-continuity-codebuddy",
+  "displayName": "Agent Continuity for CodeBuddy",
+  "description": "Opt-in conversation continuity, MinIO archive status, billing and local simulated checkout.",
+  "publisher": "agent-continuity",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "repository": {"type": "git", "url": "git+ssh://git@github.com/bjzhangshuai/agent-continuity-master.git"},
+  "engines": {"vscode": "^1.70.0"},
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished", "onCommand:agentContinuity.status"],
+  "main": "extension.js",
+  "contributes": {
+    "commands": [
+      {"command": "agentContinuity.status", "title": "Agent Continuity: 查看同步状态"},
+      {"command": "agentContinuity.resume", "title": "Agent Continuity: 从其他设备接续任务"},
+      {"command": "agentContinuity.upload", "title": "Agent Continuity: 上传文件到 MinIO"},
+      {"command": "agentContinuity.billing", "title": "Agent Continuity: 查看账单与模拟支付"},
+      {"command": "agentContinuity.openConsole", "title": "Agent Continuity: 打开本地管理控制台"}
+    ],
+    "configuration": {
+      "title": "Agent Continuity",
+      "properties": {
+        "agentContinuity.python": {"type": "string", "default": "python3", "description": "Python 3 executable used by the local bridge."}
+      }
+    }
+  }
+}

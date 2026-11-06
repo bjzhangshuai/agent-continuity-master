@@ -33,6 +33,12 @@ func (s *Store) SaveTreasury(_ context.Context, d protocol.TreasuryDocument, ver
 		return treasury.ErrConflict
 	}
 	d.Version = version + 1
+	for _, c := range d.Collections {
+		bill, ok := s.billingDocuments[c.InvoiceID]
+		if !ok || bill.Version != c.BillingVersion {
+			return treasury.ErrConflict
+		}
+	}
 	s.treasuryDocuments[d.OwnerAccountID] = cloneTreasury(d)
 	return nil
 }

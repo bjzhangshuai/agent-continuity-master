@@ -56,7 +56,38 @@ func (s *Service) Load(ctx context.Context) (protocol.TreasuryDocument, error) {
 	if errors.Is(err, ErrNotFound) {
 		return protocol.TreasuryDocument{OwnerAccountID: s.Owner, Destinations: []protocol.TreasuryDestination{}, Collections: []protocol.TreasuryCollection{}, Payouts: []protocol.TreasuryPayout{}, Events: []protocol.TreasuryEvent{}}, nil
 	}
+	if err == nil {
+		err = s.projectRefunds(ctx, &d)
+	}
 	return d, err
+}
+
+// Refund evidence remains authoritative in the invoice aggregate. A version
+// guard at treasury commit makes concurrent payout reservations retry.
+func (s *Service) projectRefunds(ctx context.Context, d *protocol.TreasuryDocument) error {
+	for i := range d.Collections {
+		c := &d.Collections[i]
+		bill, err := s.Repo.GetBillByID(ctx, c.InvoiceID)
+		if err != nil {
+			return err
+		}
+		c.BillingVersion = bill.Version
+		c.RefundedMinor = 0
+		c.RefundHeldMinor = 0
+		for _, r := range bill.Refunds {
+			if r.PaymentID != c.PaymentID {
+				continue
+			}
+			switch r.Status {
+			case "succeeded":
+				c.RefundedMinor += r.AmountMinor
+			case "rejected", "failed":
+			default:
+				c.RefundHeldMinor += r.AmountMinor
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) mutate(ctx context.Context, fn func(*protocol.TreasuryDocument) error) (protocol.TreasuryDocument, error) {
@@ -68,8 +99,24 @@ func (s *Service) mutate(ctx context.Context, fn func(*protocol.TreasuryDocument
 		if err != nil {
 			return d, err
 		}
+		billVersions := map[string]int64{}
+		for _, c := range d.Collections {
+			billVersions[c.ID] = c.BillingVersion
+		}
 		if err = fn(&d); err != nil {
 			return d, err
+		}
+		if err = s.projectRefunds(ctx, &d); err != nil {
+			return d, err
+		}
+		changed := false
+		for _, c := range d.Collections {
+			if v, ok := billVersions[c.ID]; ok && v != c.BillingVersion {
+				changed = true
+			}
+		}
+		if changed {
+			continue
 		}
 		if len(d.Collections) > 5000 || len(d.Payouts) > 5000 || len(d.Events) > 50000 {
 			return d, fmt.Errorf("%w: operator ledger capacity reached; archive before further writes", ErrInvalid)
@@ -106,10 +153,12 @@ func Balances(d protocol.TreasuryDocument) []protocol.TreasuryBalance {
 		b := get(c.Currency)
 		b.GrossMinor += c.GrossMinor
 		b.FeeMinor += c.FeeMinor
+		b.RefundedMinor += c.RefundedMinor
+		b.RefundHeldMinor += c.RefundHeldMinor
 		if c.Status == "settled" {
-			b.AvailableMinor += c.NetMinor
+			b.AvailableMinor += c.NetMinor - c.RefundedMinor - c.RefundHeldMinor
 		} else {
-			b.PendingMinor += c.NetMinor
+			b.PendingMinor += c.NetMinor - c.RefundedMinor - c.RefundHeldMinor
 		}
 	}
 	for _, p := range d.Payouts {
@@ -401,6 +450,9 @@ func (s *Service) Submit(ctx context.Context, payout, actor string) (protocol.Tr
 			}
 			if p.Status != "approved" {
 				return ErrConflict
+			}
+			if p.Provider == "demo" && available(*d, p.Currency) < 0 {
+				return ErrInsufficient
 			}
 			if (p.Provider == "stripe" && s.Stripe == nil) || (p.Provider == "demo" && !s.Demo) || (p.Provider != "demo" && p.Provider != "stripe") {
 				return ErrUnavailable

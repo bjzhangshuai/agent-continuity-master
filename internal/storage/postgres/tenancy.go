@@ -103,7 +103,7 @@ func (s *Store) ListMerchantBills(ctx context.Context, limit int) ([]protocol.Bi
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	rows, err := s.pool.Query(ctx, `SELECT document FROM billing_documents WHERE status='paid' AND jsonb_array_length(document->'receipts')>0 ORDER BY created_at DESC LIMIT $1`, limit)
+	rows, err := s.pool.Query(ctx, `SELECT document FROM billing_documents WHERE status IN ('paid','refunded','disputed') AND jsonb_array_length(document->'receipts')>0 ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}

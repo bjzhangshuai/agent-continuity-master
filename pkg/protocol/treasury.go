@@ -15,6 +15,9 @@ type TreasuryDestination struct {
 }
 
 type TreasuryCollection struct {
+	RefundedMinor         int64      `json:"refunded_minor"`
+	RefundHeldMinor       int64      `json:"refund_held_minor"`
+	BillingVersion        int64      `json:"billing_version"`
 	ID                    string     `json:"collection_id"`
 	InvoiceID             string     `json:"invoice_id"`
 	InvoiceNumber         string     `json:"invoice_number"`
@@ -72,13 +75,15 @@ type TreasuryDocument struct {
 }
 
 type TreasuryBalance struct {
-	Currency       string `json:"currency"`
-	Environment    string `json:"environment"`
-	GrossMinor     int64  `json:"gross_minor"`
-	FeeMinor       int64  `json:"fee_minor"`
-	PendingMinor   int64  `json:"pending_minor"`
-	AvailableMinor int64  `json:"available_minor"`
-	ReservedMinor  int64  `json:"reserved_minor"`
-	PaidMinor      int64  `json:"paid_minor"`
-	ReturnedMinor  int64  `json:"returned_minor"`
+	RefundedMinor   int64  `json:"refunded_minor"`
+	RefundHeldMinor int64  `json:"refund_held_minor"`
+	Currency        string `json:"currency"`
+	Environment     string `json:"environment"`
+	GrossMinor      int64  `json:"gross_minor"`
+	FeeMinor        int64  `json:"fee_minor"`
+	PendingMinor    int64  `json:"pending_minor"`
+	AvailableMinor  int64  `json:"available_minor"`
+	ReservedMinor   int64  `json:"reserved_minor"`
+	PaidMinor       int64  `json:"paid_minor"`
+	ReturnedMinor   int64  `json:"returned_minor"`
 }

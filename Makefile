@@ -54,6 +54,7 @@ build:
 	$(GO) build -trimpath -o bin/server ./cmd/server
 	$(GO) build -trimpath -o bin/daemon ./cmd/daemon
 	$(GO) build -trimpath -o bin/agentcloud ./cmd/agentcloud
+	$(GO) build -trimpath -o bin/archive-probe ./cmd/archive-probe
 
 docker-build:
 	docker --context rancher-desktop build -t agent-continuity:dev .
@@ -77,6 +78,12 @@ dev:
 
 helm-lint:
 	$(HELM) lint $(CHART) -f deploy/environments/dev/values.yaml
+	$(HELM) lint $(CHART) -f deploy/environments/staging/values.yaml
+	$(HELM) lint $(CHART) -f deploy/environments/production/values.yaml
+	$(HELM) lint deploy/helm/agent-continuity-infra
+	$(HELM) lint deploy/helm/agent-continuity-infra -f deploy/environments/dev/infra-values.yaml
+	$(HELM) lint deploy/helm/agent-continuity-infra -f deploy/environments/production/infra-observability-values.yaml
+	python3 scripts/test-helm-contracts.py
 
 helm-template:
 	$(HELM) template agent-continuity $(CHART) -f deploy/environments/dev/values.yaml >/dev/null

@@ -11,7 +11,10 @@ import (
 )
 
 func (s *Store) SummarizeUsage(ctx context.Context, account, org string, from, to time.Time) ([]protocol.UsageTotal, error) {
-	rows, err := s.pool.Query(ctx, `SELECT metric,unit,SUM(quantity)::bigint,COUNT(*) FROM usage_records WHERE ($2<>'' OR account_id=$1) AND COALESCE(organization_id,'')=$2 AND recorded_at >= $3 AND recorded_at < $4 GROUP BY metric,unit ORDER BY metric`, account, org, from, to)
+	rows, err := s.pool.Query(ctx, `SELECT metric,unit,SUM(quantity)::bigint,COUNT(*) FROM usage_records WHERE ($2<>'' OR account_id=$1) AND COALESCE(organization_id,'')=$2 AND recorded_at >= $3 AND recorded_at < $4 GROUP BY metric,unit
+ UNION ALL
+ SELECT 'storage.retained.byte_hours','byte_hour',floor(sum(size::numeric*EXTRACT(EPOCH FROM(LEAST(COALESCE(deleted_at,$4),$4)-GREATEST(stored_at,$3))))/3600)::bigint,count(*) FROM archive_jobs WHERE ($2<>'' OR account_id=$1) AND organization_id=$2 AND stored_at<$4 AND (deleted_at IS NULL OR deleted_at>$3) HAVING count(*)>0
+ ORDER BY metric`, account, org, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +139,40 @@ func (s *Store) SaveBill(ctx context.Context, d protocol.BillingDocument, versio
 			return err
 		}
 	}
+	for _, r := range d.Refunds {
+		provider := ""
+		for _, p := range d.Payments {
+			if p.ID == r.PaymentID {
+				provider = p.Provider
+			}
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO billing_refund_routes(refund_id,invoice_id,provider,provider_refund_id,status,last_checked_at,check_attempts) VALUES($1,$2,$3,NULLIF($4,''),$5,$6,$7) ON CONFLICT(refund_id) DO UPDATE SET provider_refund_id=EXCLUDED.provider_refund_id,status=EXCLUDED.status,last_checked_at=EXCLUDED.last_checked_at,check_attempts=EXCLUDED.check_attempts`, r.ID, d.Invoice.ID, provider, r.ProviderRefundID, r.Status, r.LastCheckedAt, r.CheckAttempts)
+		if err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
+}
+
+// PaymentID carries the refund ID for this common recovery target structure.
+func (s *Store) DueRefunds(ctx context.Context, before time.Time, limit int) ([]protocol.PaymentReconcileTarget, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 10
+	}
+	rows, err := s.pool.Query(ctx, `SELECT d.account_id,r.invoice_id,r.refund_id FROM billing_refund_routes r JOIN billing_documents d USING(invoice_id) WHERE r.provider<>'demo' AND r.status IN ('submitting','pending','review') AND r.check_attempts<20 AND (r.last_checked_at IS NULL OR r.last_checked_at<$1) ORDER BY r.last_checked_at NULLS FIRST LIMIT $2`, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []protocol.PaymentReconcileTarget{}
+	for rows.Next() {
+		var v protocol.PaymentReconcileTarget
+		if err = rows.Scan(&v.AccountID, &v.InvoiceID, &v.PaymentID); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) DuePayments(ctx context.Context, before time.Time, limit int) ([]protocol.PaymentReconcileTarget, error) {

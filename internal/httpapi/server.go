@@ -192,6 +192,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/tasks/{taskID}/keys", s.putTaskKeySet)
 	mux.HandleFunc("GET /v1/tasks/{taskID}/artifacts", s.listArtifacts)
 	mux.HandleFunc("POST /v1/tasks/{taskID}/contents", s.uploadContent)
+	mux.HandleFunc("POST /v1/tasks/{taskID}/storage-jobs/{jobID}/delete", s.deleteStorageJob)
+	mux.HandleFunc("POST /v1/tasks/{taskID}/storage-jobs/{jobID}/hold", s.holdStorageJob)
 	mux.HandleFunc("GET /v1/storage/config", s.archiveConfig)
 	mux.HandleFunc("GET /v1/tasks/{taskID}/storage-jobs", s.listStorageJobs)
 	mux.HandleFunc("GET /v1/tasks/{taskID}/storage-jobs/{jobID}", s.getStorageJob)
@@ -250,6 +252,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /app.js", s.staticAsset)
 	mux.HandleFunc("GET /archive.js", s.staticAsset)
 	mux.HandleFunc("GET /billing.js", s.staticAsset)
+	mux.HandleFunc("GET /refunds.js", s.staticAsset)
 	mux.HandleFunc("GET /treasury.js", s.staticAsset)
 	mux.HandleFunc("GET /styles.css", s.staticAsset)
 	mux.HandleFunc("GET /", s.index)
@@ -636,6 +639,12 @@ func (s *Server) putArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	digest := r.Header.Get("X-Content-SHA256")
+	unlock, err := s.artifacts.LockContent(r.Context(), digest)
+	if err != nil {
+		writeError(w, 400, "content_lock_failed", "Invalid content digest or staging lock unavailable")
+		return
+	}
+	defer unlock()
 	ref, size, err := s.artifacts.Put(http.MaxBytesReader(w, r.Body, s.maxBodyBytes), digest)
 	if err != nil {
 		if errors.Is(err, artifactstore.ErrHashMismatch) {

@@ -13,6 +13,14 @@ coverage.*
 node_modules/
 sdk/typescript/dist/
 __pycache__/
+.continuity-install/
+experiments/codebuddy-device-a/.codebuddy/
+experiments/codebuddy-device-a/.continuity/
+experiments/codebuddy-device-b/
+integrations/codebuddy-extension/*.vsix
+integrations/codebuddy-extension/bridge.py
+integrations/codebuddy-extension/sdk/
+integrations/codebuddy-extension/LICENSE
 .gradle/
 .build/
 build/

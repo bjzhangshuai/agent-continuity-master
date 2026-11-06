@@ -1,4 +1,7 @@
 replicaCount: 1
+imagePullSecrets: []
+# Bump on externally rotated Secrets, then helm upgrade (GitOps lookup may be unavailable).
+secretRevision: ""
 
 image:
   repository: agent-continuity
@@ -9,17 +12,30 @@ image:
   buildID: ""
 
 existingSecret: agent-continuity-secrets
+databaseTLS:
+  existingSecret: ""
 
 archive:
   enabled: false
   # For real cloud credentials, use a Secret with config.json and credential files.
   existingSecret: ""
+  # Optional separate S3 credentials/private CA, mounted read-only at /run/archive-storage.
+  storageSecret: ""
   config: {}
   workerReplicas: 1
+  workerPDB: {enabled: false, minAvailable: 1}
   workerResources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {cpu: 500m, memory: 256Mi}
   autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 16, targetCPUUtilizationPercentage: 70}
+  # Alternative to CPU HPA. Requires KEDA + a scraping Prometheus installation.
+  queueAutoscaling:
+    enabled: false
+    serverAddress: ""
+    threshold: "100"
+    minReplicas: 2
+    maxReplicas: 16
+    authenticationRef: ""
   broker:
     # Isolated single-node development broker. Production: Argo EventBus or an
     # external 3/5-node JetStream cluster, with install=false and TLS credentials.
@@ -127,6 +143,14 @@ networkPolicy:
   # Kubernetes NetworkPolicy cannot match DNS names. Production deployments
   # must explicitly list CIDRs/ports for external S3, KMS, and OTLP endpoints.
   externalEgress: []
+  # Kubernetes NetworkPolicyPeer objects: ipBlock or namespaceSelector+podSelector.
+  databasePeers: []
+  brokerPeers: []
+  # Private S3 service and trace collector peers, isolated by pod/namespace labels.
+  objectStoragePeers: []
+  objectStoragePort: 9000
+  otlpPeers: []
+  monitoringNamespaceLabels: {kubernetes.io/metadata.name: monitoring}
 
 serviceMonitor:
   enabled: false

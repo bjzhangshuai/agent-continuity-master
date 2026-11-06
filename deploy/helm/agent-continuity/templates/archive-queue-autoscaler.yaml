@@ -1,0 +1,31 @@
+{{- if and .Values.archive.enabled .Values.archive.queueAutoscaling.enabled }}
+{{- if .Values.archive.autoscaling.enabled }}
+{{- fail "choose archive.autoscaling (CPU HPA) OR archive.queueAutoscaling (KEDA), not both" }}
+{{- end }}
+{{- if not .Values.serviceMonitor.enabled }}
+{{- fail "queueAutoscaling requires serviceMonitor.enabled and a configured Prometheus scrape" }}
+{{- end }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "agent-continuity.fullname" . }}-archive-worker
+spec:
+  scaleTargetRef: {name: {{ include "agent-continuity.fullname" . }}-archive-worker}
+  pollingInterval: 30
+  cooldownPeriod: 120
+  minReplicaCount: {{ .Values.archive.queueAutoscaling.minReplicas }}
+  maxReplicaCount: {{ .Values.archive.queueAutoscaling.maxReplicas }}
+  fallback: {failureThreshold: 3, replicas: {{ .Values.archive.queueAutoscaling.minReplicas }}}
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: {{ required "queueAutoscaling.serverAddress is required" .Values.archive.queueAutoscaling.serverAddress | quote }}
+        metricName: continuity_archive_pending_jobs
+        # Each worker exports the same DB-wide count. Sum would multiply backlog!
+        query: 'max(continuity_archive_pending_jobs{namespace="{{ .Release.Namespace }}"})'
+        threshold: {{ .Values.archive.queueAutoscaling.threshold | quote }}
+        ignoreNullValues: "false"
+      {{- if .Values.archive.queueAutoscaling.authenticationRef }}
+      authenticationRef: {name: {{ .Values.archive.queueAutoscaling.authenticationRef }}}
+      {{- end }}
+{{- end }}

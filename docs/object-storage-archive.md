@@ -37,7 +37,7 @@ Argo Events 生态的消息后端选用 **NATS JetStream**。Worker 使用共享
 
 开发 values 启用项目自己的 JetStream（1 副本 / 1Gi PVC / 250m CPU / 128Mi 内存上限）、1 个 Worker（500m / 256Mi），对象写入 `/data/archive-demo`，并明确标记为本地演示。暂存上限 256Mi；不修改宿主机参数、其他命名空间或原有 Argo Events。
 
-生产使用健康的 Argo Events 管理的三/五副本 JetStream EventBus，或让 EventBus 连接外部 JetStream。样例见 [argo-eventbus.yaml](../deploy/examples/argo-eventbus.yaml)。将平台配置指向其 TLS 地址/凭据，使用平台独立 Stream `CONTINUITY_ARCHIVE`，不要直接混用 Argo 内部 `default.*` CloudEvent 主题。Argo 的传输封装不应被误当成此平台的 job-ID 消息格式。
+生产可用独立[基础设施 Chart](../deploy/helm/agent-continuity-infra/Chart.yaml)（固定官方 NATS 依赖，三副本 TLS）或健康的 Argo Events JetStream EventBus。样例见 [argo-eventbus.yaml](../deploy/examples/argo-eventbus.yaml)。使用平台独立 Stream `CONTINUITY_ARCHIVE`，不要直接混用 Argo 内部 CloudEvent 主题。
 
 对照 EventBus `status.config.jetstream` 提供的实际鉴权方式配置：Token 用 `token_file`；Basic 用 `username` + `password_file`；NKey/JWT 用 `credentials_file`，三选一。CA 和客户端证书分别用 `ca_file`、`client_cert_file`、`client_key_file`。不要从密码字段推测用户名，不启用跳过 TLS 校验。
 
@@ -45,9 +45,9 @@ Argo Events 生态的消息后端选用 **NATS JetStream**。Worker 使用共享
 
 - JetStream 三副本需分布在不同故障域，流 `replicas=3`，至少三个服务端节点。新增 NATS 节点与提高 Stream 副本数是独立操作，不能只改 Deployment 数字。
 - API/Worker 共用 **RWX 持久暂存卷**（如 EFS、Azure Files、NAS）并配置真实磁盘配额；本地 RWO 仅在同一节点演示。Chart 会拒绝 RWO 配置下的多 API、多 Worker 或自动扩容。
-- `archive.workerReplicas` 控制手动扩容；`archive.autoscaling` 提供 CPU HPA；I/O 型负载应接入 JetStream backlog 指标/KEDA 后再按积压自动扩容，不能仅靠 CPU。
+- `archive.workerReplicas` 控制手动扩容；CPU HPA 和可选 KEDA 积压扩容二选一；启用 KEDA 需实际安装其 CRD 并配置 Prometheus。参见[生产部署与依赖](archive-production.md)。
 - Worker 每进程 `concurrency` 可设 1..32；应按文件大小和内存预算调节。拉取有界，消息/流大小有界，超限保留 Outbox 重试；无未经测量的吞吐量承诺。
-- 暂存缓存当前**不自动清理用户数据**，达到容量会拒绝上传；需要监控容量、备份并规划缓存生命周期。归档已 stored 的附件即使本地副本缺失也能由对象存储恢复读取。生产规模化缓存回收/对象删除合规工作流未在本版自动化。
+- 暂存缓存现在支持显式开启的 TTL 回收，默认关闭；需共享 POSIX 内容锁、全部引用已 stored 及远端哈希校验。达到配额仍会拒绝新上传。归档副本删除、保留期、保留锁与审计已接入持久队列，详见[生产闭环文档](archive-production.md)。这不是原始对话或历史云版本完全擦除。
 - 云端读取、数据库与共享暂存的网络权限需同时允许；跨 AZ 故障、网络隔离、灾难恢复和高并发压力测试需在生产等价环境验收。
 
 本地既有 Argo Events controller 在本次工作前已因 `too many open files` 崩溃，本次不修复/替换它。隔离的 JetStream 不依赖该故障控制器；EventBus 样例不是“现有控制器已验收”的声明。
@@ -63,7 +63,7 @@ Argo Events 生态的消息后端选用 **NATS JetStream**。Worker 使用共享
 - `POST /v1/tasks/{taskID}/storage-backfill`：管理员显式补归档历史数据。
 - `GET /v1/storage/config`：仅返回启用状态、驱动 ID 和非敏感限制，不返回密钥/endpoint。
 
-Go `UploadContent / ListStorageJobs / GetStorageJob / RetryStorageJob`；TypeScript/Swift/Kotlin 对应 lowerCamelCase；Python `upload_content / list_storage_jobs / get_storage_job / retry_storage_job`；.NET 对应 `*Async`。这些小内容方法不替代客户端离线队列；调用方保存版本 ID、处理 401/503/507，并轮询最终状态。
+Go `UploadContent / ListStorageJobs / GetStorageJob / WaitStorageJob / RetryStorageJob`；TypeScript/Swift/Kotlin 对应 lowerCamelCase；Python 对应 snake_case；.NET 对应 `*Async`。等待方法仅在 stored 时成功，dead/deleted 返回失败，不会自动替用户重投死信。调用方仍要持久保存版本 ID，并处理 401/503/507。
 
 ```python
 from agent_continuity import Client
@@ -88,7 +88,7 @@ const page = await client.listStorageJobs(taskID);
 
 登录 [本地控制台](http://127.0.0.1:18080/) → **对象存储与队列** → 选择任务 → 查看消息状态、尝试次数、目标、内容类型和大小 → stored 后从对象存储下载。历史任务用“补归档本任务历史内容”；只有任务管理员可执行补归档/死信重投。
 
-每条归档完成时原子记录 `storage.archive.bytes` 用量，归属任务所属租户/账号，幂等键为 archive job ID。旧 `artifact.bytes` 是上传量，新指标是逻辑归档量；默认价目表**未添加自动收费项**，不会凭空改变账单。它不是物理去重容量、GB-month、厂商账单或出口带宽费；启用收费前需定义价格与计费周期，避免双重收费。
+每条归档完成时原子记录 `storage.archive.bytes`；账期汇总 `storage.retained.byte_hours`；经校验的云回源计 `storage.download.bytes`。默认价目表为新增三项显式配置零价，自定义价目表缺指标会拒绝启用归档，避免账单在运行时无法生成。三项沿用租户账单、支付链接与回执流程；计费边界和生产价格配置见[生产闭环文档](archive-production.md#存储计费契约)。
 
 测试分层：官方 Go SDK 的本地 HTTP 合约测试；PostgreSQL + 真实 JetStream 进程重启的集成测试；本地 K8s 开发链路。没有真实云凭据时，不声称 AWS/OSS/COS/Azure 商户账号已完成在线验收。
 

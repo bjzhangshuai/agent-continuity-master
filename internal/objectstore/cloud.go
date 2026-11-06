@@ -2,11 +2,16 @@ package objectstore
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
@@ -27,7 +32,27 @@ func newS3(t Target) (Provider, error) {
 	if t.PathStyle {
 		lookup = minio.BucketLookupPath
 	}
-	c, err := minio.New(u.Host, &minio.Options{Secure: u.Scheme == "https", Region: t.Region, Creds: credentials.NewStaticV4(t.AccessKey, t.SecretKey, t.SessionToken), BucketLookup: lookup})
+	options := &minio.Options{Secure: u.Scheme == "https", Region: t.Region, Creds: credentials.NewStaticV4(t.AccessKey, t.SecretKey, t.SessionToken), BucketLookup: lookup}
+	if t.CAFile != "" {
+		pem, err := os.ReadFile(t.CAFile)
+		if err != nil {
+			return nil, errors.New("cannot read object storage CA file")
+		}
+		roots, err := x509.SystemCertPool()
+		if err != nil {
+			roots = x509.NewCertPool()
+		}
+		if !roots.AppendCertsFromPEM(pem) {
+			return nil, errors.New("object storage CA file contains no certificates")
+		}
+		transport, err := minio.DefaultTransport(true)
+		if err != nil {
+			return nil, err
+		}
+		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}
+		options.Transport = transport
+	}
+	c, err := minio.New(u.Host, options)
 	if err != nil {
 		return nil, err
 	}
@@ -39,6 +64,9 @@ func (p *s3Provider) Put(ctx context.Context, o Object, r io.Reader) error {
 }
 func (p *s3Provider) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	return p.client.GetObject(ctx, p.bucket, key, minio.GetObjectOptions{})
+}
+func (p *s3Provider) Delete(ctx context.Context, key string) error {
+	return p.client.RemoveObject(ctx, p.bucket, key, minio.RemoveObjectOptions{})
 }
 
 type ossProvider struct {
@@ -63,6 +91,11 @@ func (p *ossProvider) Get(ctx context.Context, key string) (io.ReadCloser, error
 }
 
 type cosProvider struct{ client *cos.Client }
+
+func (p *ossProvider) Delete(ctx context.Context, key string) error {
+	_, err := p.client.DeleteObject(ctx, &oss.DeleteObjectRequest{Bucket: &p.bucket, Key: &key})
+	return err
+}
 
 func newCOS(t Target) (Provider, error) {
 	u, _ := url.Parse(t.Endpoint) // COS endpoint includes the full bucket-appid hostname.
@@ -92,6 +125,17 @@ type azureProvider struct {
 	container string
 }
 
+func (p *cosProvider) Delete(ctx context.Context, key string) error {
+	r, err := p.client.Object.Delete(ctx, key)
+	if r != nil && r.Body != nil {
+		r.Body.Close()
+	}
+	if r != nil && r.StatusCode == 404 {
+		return nil
+	}
+	return err
+}
+
 func newAzure(t Target) (Provider, error) {
 	credential, err := azblob.NewSharedKeyCredential(t.AccountName, t.SecretKey)
 	if err != nil {
@@ -113,4 +157,12 @@ func (p *azureProvider) Get(ctx context.Context, key string) (io.ReadCloser, err
 		return nil, err
 	}
 	return r.Body, nil
+}
+func (p *azureProvider) Delete(ctx context.Context, key string) error {
+	_, err := p.client.DeleteBlob(ctx, p.container, key, nil)
+	var response *azcore.ResponseError
+	if errors.As(err, &response) && response.StatusCode == 404 {
+		return nil
+	}
+	return err
 }

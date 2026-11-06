@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import base64
+import time
+import math
 from dataclasses import dataclass
 from typing import Any, BinaryIO, Mapping
 from urllib.error import HTTPError
@@ -34,6 +36,20 @@ class Client:
     def get_storage_job(self, task_id: str, job_id: int) -> dict[str, Any]:
         return self.request("GET", f"/v1/tasks/{quote(task_id, safe='')}/storage-jobs/{job_id}")
 
+    def wait_storage_job(self, task_id: str, job_id: int, timeout: float = 120) -> dict[str, Any]:
+        """Poll until durable receipt; bounded by polling budget plus HTTP timeout."""
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Positive archive wait timeout required")
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            job = self.get_storage_job(task_id, job_id)
+            if job["state"] == "stored":
+                return job
+            if job["state"] in ("dead", "deleted"):
+                raise RuntimeError(f"Archive job {job_id}: {job['state']} {job.get('error_code', '')}")
+            time.sleep(min(1, max(0, deadline - time.monotonic())))
+        raise TimeoutError(f"Archive job {job_id}: receipt timeout (upload may still finish)")
+
     def retry_storage_job(self, task_id: str, job_id: int) -> dict[str, Any]:
         return self.request("POST", f"/v1/tasks/{quote(task_id, safe='')}/storage-jobs/{job_id}/retry")
 
@@ -42,7 +58,7 @@ class Client:
         self.token = token
         self.timeout = timeout
 
-    def request(self, method: str, path: str, body: Any | None = None, *, extra_headers: Mapping[str, str] | None = None) -> Any:
+    def request(self, method: str, path: str, body: Any | None = None, *, extra_headers: Mapping[str, str] | None = None, response_text: bool = False) -> Any:
         data = None if body is None else json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode()
         headers = {"Accept": "application/json", "User-Agent": "agent-continuity-python/0.1.0", **(extra_headers or {})}
         if self.token:
@@ -61,7 +77,35 @@ class Client:
             except (ValueError, TypeError):
                 detail = {}
             raise APIError(error.code, detail.get("code", "http_error"), detail.get("message", error.reason)) from error
-        return None if not raw else json.loads(raw)
+        return raw.decode("utf-8") if response_text else (None if not raw else json.loads(raw))
+
+    def list_invoices(self) -> dict[str, Any]:
+        return self.request("GET", "/v1/billing/invoices?limit=200")
+
+    def get_invoice(self, invoice_id: str) -> dict[str, Any]:
+        return self.request("GET", f"/v1/billing/invoices/{quote(invoice_id, safe='')}")
+
+    def quote_invoice(self, period: Mapping[str, Any]) -> dict[str, Any]:
+        return self.request("POST", "/v1/billing/quote", period)
+
+    def issue_invoice(self, period: Mapping[str, Any], key: str) -> dict[str, Any]:
+        return self.request("POST", "/v1/billing/invoices", period, extra_headers={"Idempotency-Key": key})
+
+    def create_payment(self, invoice_id: str, provider: str, key: str) -> dict[str, Any]:
+        return self.request("POST", f"/v1/billing/invoices/{quote(invoice_id, safe='')}/payments", {"provider": provider}, extra_headers={"Idempotency-Key": key})
+
+    def reconcile_payment(self, invoice_id: str, payment_id: str) -> dict[str, Any]:
+        return self.request("POST", f"/v1/billing/invoices/{quote(invoice_id, safe='')}/payments/{quote(payment_id, safe='')}/reconcile")
+
+    def request_refund(self, invoice_id: str, payment_id: str, amount_minor: int, reason: str, key: str) -> dict[str, Any]:
+        """Persist and reuse key for retries. Approval is a separate merchant operation."""
+        return self.request("POST", f"/v1/billing/invoices/{quote(invoice_id, safe='')}/refunds", {"payment_id": payment_id, "amount_minor": amount_minor, "reason": reason}, extra_headers={"Idempotency-Key": key})
+
+    def reconcile_refund(self, invoice_id: str, refund_id: str) -> dict[str, Any]:
+        return self.request("POST", f"/v1/billing/invoices/{quote(invoice_id, safe='')}/refunds/{quote(refund_id, safe='')}/reconcile")
+
+    def invoice_statement(self, invoice_id: str) -> str:
+        return self.request("GET", f"/v1/billing/invoices/{quote(invoice_id, safe='')}/statement", response_text=True)
 
     def health(self) -> None:
         self.request("GET", "/v1/health/ready")

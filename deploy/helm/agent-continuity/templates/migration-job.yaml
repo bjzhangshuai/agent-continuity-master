@@ -20,6 +20,9 @@ spec:
         app.kubernetes.io/component: migration
         app.kubernetes.io/part-of: agent-continuity
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
       restartPolicy: Never
       automountServiceAccountToken: false
       securityContext:
@@ -31,6 +34,9 @@ spec:
         - name: migrate
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.databaseTLS.existingSecret }}
+          volumeMounts: [{name: database-tls, mountPath: /run/database-tls, readOnly: true}]
+          {{- end }}
           command: ["/bin/sh", "-c"]
           args:
             - 'attempt=0; until /app/server migrate; do attempt=$((attempt+1)); [ "$attempt" -ge 30 ] && exit 1; sleep 2; done'
@@ -51,3 +57,8 @@ spec:
           resources:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {cpu: 250m, memory: 128Mi}
+      {{- if .Values.databaseTLS.existingSecret }}
+      volumes:
+        - name: database-tls
+          secret: {secretName: {{ .Values.databaseTLS.existingSecret }}, defaultMode: 0440}
+      {{- end }}

@@ -189,7 +189,7 @@ func TestTreasuryLocalCompleteJourney(t *testing.T) {
 	}
 	_ = json.Unmarshal(call("GET", "/v1/treasury", nil, 200, ""), &view)
 	for _, b := range treasury.Balances(view.Document) {
-		if b.AvailableMinor < 0 || b.GrossMinor-b.FeeMinor != b.PendingMinor+b.AvailableMinor+b.ReservedMinor+b.PaidMinor {
+		if b.AvailableMinor < 0 || b.GrossMinor-b.FeeMinor-b.RefundedMinor-b.RefundHeldMinor != b.PendingMinor+b.AvailableMinor+b.ReservedMinor+b.PaidMinor {
 			t.Fatal("money conservation failed", b)
 		}
 	}

@@ -3,6 +3,15 @@ import unittest
 from agent_continuity import Client
 
 class ArchiveContractTest(unittest.TestCase):
+    def test_wait_terminal_receipts(self):
+        client = Client("http://local.test")
+        for state in ("stored", "dead", "deleted"):
+            client.get_storage_job = lambda *args: {"id": 7, "state": state}
+            if state == "stored":
+                self.assertEqual(client.wait_storage_job("t", 7)["state"], "stored")
+            else:
+                with self.assertRaises(RuntimeError): client.wait_storage_job("t", 7)
+        with self.assertRaises(ValueError): client.wait_storage_job("t", 7, 0)
     def test_binary_content_retry_identity_and_status(self):
         client = Client("http://local.test", "credential")
         calls = []

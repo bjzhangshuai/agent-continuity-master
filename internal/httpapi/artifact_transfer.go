@@ -158,6 +158,12 @@ func (s *Server) completeArtifactUpload(w http.ResponseWriter, r *http.Request) 
 		manifest[i] = map[string]any{"index": chunk.Index, "size": chunk.Size, "content_hash": chunk.ContentHash}
 	}
 	manifestRaw, _ := json.Marshal(manifest)
+	unlock, err := s.artifacts.LockContent(r.Context(), session.ContentHash)
+	if err != nil {
+		writeError(w, 503, "content_lock_failed", "Staging content lock unavailable")
+		return
+	}
+	defer unlock()
 	ref, size, err := s.artifacts.Assemble(session.ID, refs, session.ContentHash, session.TotalSize)
 	if err != nil {
 		if errors.Is(err, artifactstore.ErrHashMismatch) {

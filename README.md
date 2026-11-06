@@ -1,10 +1,17 @@
 # Agent Continuity
 
+本地 CodeBuddy 插件、MinIO、跨设备和支付演示的查看步骤见
+[CodeBuddy 本地闭环实验](docs/codebuddy-local-e2e.zh-CN.md)。
+
+原路退款、票据、跨平台安装器与发行包见 [退款与交付](docs/refunds-and-delivery.zh-CN.md)。
+
 Agent Continuity is a vendor-neutral persistent Task State and collaboration platform. A Task—not a chat transcript—is the durable unit: identity, objective, signed event DAG, snapshots, artifacts, participants, agents, permissions, audit and security context survive device, model, agent and network changes.
 
 ## Delivered capabilities
 
 - Multi-cloud archival: transactional Outbox → NATS JetStream (Argo Events ecosystem) → independent workers → AWS S3 / Alibaba OSS / Tencent COS / Azure Blob / self-hosted S3. Includes status, retry/dead-letter replay, tenant-attributed idempotent archive metering and verified private downloads. See [configuration, SDKs, operational limits and cloud acceptance status](docs/object-storage-archive.md).
+- Archive closure: [production Charts, preflight, lifecycle, storage billing, KEDA and opt-in cloud probes](docs/archive-production.md). Local demonstration is not live cloud or production HA acceptance.
+- Local S3 testing: [TLS MinIO, safe local deployment, demo walkthrough and optional Chart dependencies](docs/minio-local-and-chart-dependencies.md). Existing filesystem archives remain readable.
 
 - Causal Task/Event core: Ed25519 device identity, per-device sequence, HLC, causal parents, server cursor, append-only provenance, idempotency and replay protection.
 - Offline sync: signed hello/capability negotiation, crash-safe Outbox and bbolt Inbox/index/cursors, push/pull/ack, retry with jitter, bandwidth limits, pause/resume and diagnostics.

@@ -153,3 +153,29 @@ func (s *Store) DuePayments(_ context.Context, before time.Time, limit int) ([]p
 	}
 	return out, nil
 }
+
+func (s *Store) DueRefunds(_ context.Context, before time.Time, limit int) ([]protocol.PaymentReconcileTarget, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if limit <= 0 || limit > 20 {
+		limit = 10
+	}
+	out := []protocol.PaymentReconcileTarget{}
+	for _, d := range s.billingDocuments {
+		for _, r := range d.Refunds {
+			demo := false
+			for _, p := range d.Payments {
+				if p.ID == r.PaymentID {
+					demo = p.Provider == "demo"
+				}
+			}
+			if !demo && (r.Status == "pending" || r.Status == "submitting" || r.Status == "review") && r.CheckAttempts < 20 && (r.LastCheckedAt == nil || r.LastCheckedAt.Before(before)) {
+				out = append(out, protocol.PaymentReconcileTarget{AccountID: d.Invoice.AccountID, InvoiceID: d.Invoice.ID, PaymentID: r.ID})
+				if len(out) >= limit {
+					return out, nil
+				}
+			}
+		}
+	}
+	return out, nil
+}

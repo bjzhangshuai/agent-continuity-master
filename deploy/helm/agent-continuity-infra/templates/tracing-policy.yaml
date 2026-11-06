@@ -1,0 +1,47 @@
+{{- if .Values.otel.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-otel
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: otel, app.kubernetes.io/instance: {{ .Release.Name }}}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app.kubernetes.io/part-of: agent-continuity}}
+          {{- with .Values.clientNamespaceLabels }}
+          namespaceSelector: {matchLabels: {{ toJson . }}}
+          {{- end }}
+      ports: [{protocol: TCP, port: 4318}]
+  egress:
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: tempo, app.kubernetes.io/instance: {{ .Release.Name }}}}
+      ports: [{protocol: TCP, port: 4317}]
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+{{- end }}
+{{- if .Values.tempo.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-tempo
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: tempo, app.kubernetes.io/instance: {{ .Release.Name }}}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: otel, app.kubernetes.io/instance: {{ .Release.Name }}}}
+      ports: [{protocol: TCP, port: 4317}]
+    - from:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: grafana, app.kubernetes.io/instance: {{ .Release.Name }}}}
+      ports: [{protocol: TCP, port: 3200}]
+  egress:
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: tempo, app.kubernetes.io/instance: {{ .Release.Name }}}}
+      ports: [{protocol: TCP, port: 9095}]
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+{{- end }}

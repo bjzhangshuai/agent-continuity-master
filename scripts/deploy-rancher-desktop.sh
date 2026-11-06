@@ -10,6 +10,8 @@ release=${CONTINUITY_RELEASE:-agent-continuity}
 repository_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 chart="$repository_dir/deploy/helm/agent-continuity"
 values="$repository_dir/deploy/environments/dev/values.yaml"
+infra_chart="$repository_dir/deploy/helm/agent-continuity-infra"
+infra_values="$repository_dir/deploy/environments/dev/infra-values.yaml"
 secret_name=agent-continuity-secrets
 
 require_command() { command -v "$1" >/dev/null 2>&1 || { echo "required command not found: $1" >&2; exit 1; }; }
@@ -18,6 +20,7 @@ require_command helm
 require_command docker
 require_command openssl
 require_command jq
+require_command python3
 
 # Only the explicitly chosen local demo operator can access merchant funds.
 # Reuse the existing release setting; never grant treasury access to all payers.
@@ -89,6 +92,23 @@ if [ -z "$(kubectl --context "$context" -n "$namespace" get secret "$secret_name
   echo "Added a master-key field to the existing namespace-scoped secret without replacing its other values."
 fi
 
+# Install only the dev profile: no cluster-scoped operators, no second broker,
+# no replacement of the existing database/staging/broker PVCs. Retained Secrets
+# and MinIO PVC survive upgrades and accidental release removal.
+# Dependencies are vendored/locked. Missing packages fail rendering without
+# updating the user's unrelated Helm repositories or downloading optional stacks.
+helm template "$release-infra" "$infra_chart" --namespace "$namespace" --values "$infra_values" >/dev/null
+python3 "$repository_dir/scripts/preflight-infra.py" --context "$context" \
+  --namespace "$namespace" --release "$release-infra" --values "$infra_values"
+helm upgrade --install "$release-infra" "$infra_chart" \
+  --kube-context "$context" --namespace "$namespace" --values "$infra_values" \
+  --rollback-on-failure --wait --timeout 5m
+
+helm test "$release-infra" --kube-context "$context" --namespace "$namespace" --logs --timeout 120s
+
+python3 "$repository_dir/scripts/preflight-helm.py" --context "$context" \
+  --namespace "$namespace" --release "$release" --values "$values"
+
 helm upgrade --install "$release" "$chart" \
   --kube-context "$context" \
   --namespace "$namespace" \
@@ -101,7 +121,11 @@ helm upgrade --install "$release" "$chart" \
 
 kubectl --context "$context" -n "$namespace" rollout status statefulset/"$release-postgres" --timeout=120s
 kubectl --context "$context" -n "$namespace" rollout status deployment/"$release" --timeout=120s
-kubectl --context "$context" wait --for=condition=Ready pod -l app.kubernetes.io/instance="$release" --namespace "$namespace" --timeout=120s
+kubectl --context "$context" -n "$namespace" rollout status deployment/"$release-archive-worker" --timeout=120s
+# Completed/failed historical pods are retained for diagnostics; only active
+# pods can become Ready. Deployment rollout above checks desired replicas.
+kubectl --context "$context" wait --for=condition=Ready pod -l app.kubernetes.io/instance="$release" --field-selector=status.phase=Running --namespace "$namespace" --timeout=120s
 kubectl --context "$context" get nodes
 kubectl --context "$context" -n "$namespace" get pods,services,pvc
+echo "MinIO is private/TLS at https://continuity-minio:9000; new archives use minio-dev-v1."
 echo "Deployment completed without changing the current kubectl context."

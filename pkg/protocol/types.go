@@ -36,6 +36,8 @@ type Task struct {
 	Status         string          `json:"status"`
 	OriginDevice   string          `json:"origin_device,omitempty"`
 	HeadEventIDs   []string        `json:"head_event_ids"`
+	EventCount     int64           `json:"event_count"`
+	ArtifactCount  int64           `json:"artifact_count"`
 	Metadata       json.RawMessage `json:"metadata,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
 	UpdatedAt      time.Time       `json:"updated_at"`

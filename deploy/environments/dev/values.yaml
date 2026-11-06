@@ -2,9 +2,21 @@ replicaCount: 1
 archive:
   enabled: true
   broker: {install: true}
+  storageSecret: continuity-minio-client
   config:
-    default_target: local-demo-v1
+    default_target: minio-dev-v1
     targets:
+      - id: minio-dev-v1
+        provider: s3
+        endpoint: https://continuity-minio:9000
+        bucket: continuity-archive
+        region: us-east-1
+        prefix: continuity
+        path_style: true
+        ca_file: /run/archive-storage/ca.crt
+        access_key_file: /run/archive-storage/access-key
+        secret_key_file: /run/archive-storage/secret-key
+      # Do not remove or repoint this target: historical receipts reference it.
       - {id: local-demo-v1, provider: filesystem, root: /data/archive-demo, prefix: continuity}
     broker:
       url: nats://agent-continuity-archive-broker:4222
@@ -31,3 +43,6 @@ autoscaling: {enabled: false}
 podDisruptionBudget: {enabled: false}
 ingress: {enabled: false}
 serviceMonitor: {enabled: false}
+networkPolicy:
+  objectStoragePeers:
+    - podSelector: {matchLabels: {app: minio, release: agent-continuity-infra}}

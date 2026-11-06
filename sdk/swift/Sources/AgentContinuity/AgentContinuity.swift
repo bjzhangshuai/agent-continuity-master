@@ -241,6 +241,7 @@ public struct SyncPullResponse: Codable, Sendable { public let batches: [SyncBat
 
 public enum SDKError: Error, Equatable { case invalidURL, invalidDate(String), invalidBase64, http(Int, String), emptyResponse }
 
+private struct RefundInput: Encodable { let payment_id: String; let amount_minor: Int64; let reason: String }
 public actor AgentContinuityClient {
     public let baseURL: URL
     public var token: String
@@ -263,6 +264,19 @@ public actor AgentContinuityClient {
     public func listTasks() async throws -> JSONValue { try await request("GET", "/v1/tasks") }
     public func listStorageJobs(taskID: String, after: Int64 = 0) async throws -> JSONValue { try await request("GET", "/v1/tasks/\(taskID.urlPath)/storage-jobs?after=\(after)") }
     public func getStorageJob(taskID: String, jobID: Int64) async throws -> JSONValue { try await request("GET", "/v1/tasks/\(taskID.urlPath)/storage-jobs/\(jobID)") }
+    public func waitStorageJob(taskID: String, jobID: Int64, timeout: TimeInterval = 120) async throws -> JSONValue {
+        guard timeout.isFinite && timeout > 0 else { throw SDKError.http(400, "Positive archive wait timeout required") }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            try _Concurrency.Task<Never, Never>.checkCancellation()
+            let job = try await getStorageJob(taskID: taskID, jobID: jobID)
+            guard case .object(let fields) = job, case .string(let state) = fields["state"] else { throw SDKError.emptyResponse }
+            if state == "stored" { return job }
+            if state == "dead" || state == "deleted" { throw SDKError.http(409, "Archive job ended in \(state)") }
+            try await _Concurrency.Task<Never, Never>.sleep(nanoseconds: 1_000_000_000)
+        }
+        throw SDKError.http(408, "Archive receipt timeout; upload may still finish")
+    }
     public func retryStorageJob(taskID: String, jobID: Int64) async throws -> JSONValue { try await request("POST", "/v1/tasks/\(taskID.urlPath)/storage-jobs/\(jobID)/retry", body: [String:String]()) }
     /// Acceptance is not cloud completion. Reuse versionID on network retries.
     public func uploadContent(taskID: String, artifactID: String, versionID: String, filename: String, contentType: String, content: Data, parentVersionID: String = "") async throws -> JSONValue {
@@ -279,9 +293,30 @@ public actor AgentContinuityClient {
     public func syncPull(deviceID: String, tasks: [PullCursor]) async throws -> SyncPullResponse { try await request("POST", "/v1/sync/pull", body: SyncPull(deviceID: deviceID, tasks: tasks)) }
     public func syncAck(deviceID: String, tasks: [AckCursor]) async throws { let _: EmptyResponse = try await request("POST", "/v1/sync/ack", body: SyncAck(deviceID: deviceID, tasks: tasks), allowEmpty: true) }
 
-    private func request<Input: Encodable, Output: Decodable>(_ method: String, _ path: String, body: Input, allowEmpty: Bool = false) async throws -> Output {
+    private func escaped(_ value: String) -> String { value.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"))! }
+    public func listInvoices() async throws -> JSONValue { try await request("GET", "/v1/billing/invoices?limit=200") }
+    public func getInvoice(_ id: String) async throws -> JSONValue { try await request("GET", "/v1/billing/invoices/\(escaped(id))") }
+    public func quoteInvoice(period: JSONValue) async throws -> JSONValue { try await request("POST", "/v1/billing/quote", body: period) }
+    public func issueInvoice(period: JSONValue, key: String) async throws -> JSONValue { try await request("POST", "/v1/billing/invoices", body: period, key: key) }
+    public func createPayment(invoiceID: String, provider: String, key: String) async throws -> JSONValue { try await request("POST", "/v1/billing/invoices/\(escaped(invoiceID))/payments", body: ["provider":provider], key: key) }
+    public func reconcilePayment(invoiceID: String, paymentID: String) async throws -> JSONValue { try await request("POST", "/v1/billing/invoices/\(escaped(invoiceID))/payments/\(escaped(paymentID))/reconcile") }
+    public func requestRefund(invoiceID: String, paymentID: String, amountMinor: Int64, reason: String, key: String) async throws -> JSONValue { try await request("POST", "/v1/billing/invoices/\(escaped(invoiceID))/refunds", body: RefundInput(payment_id: paymentID, amount_minor: amountMinor, reason: reason), key: key) }
+    public func reconcileRefund(invoiceID: String, refundID: String) async throws -> JSONValue { try await request("POST", "/v1/billing/invoices/\(escaped(invoiceID))/refunds/\(escaped(refundID))/reconcile") }
+    public func invoiceStatement(_ id: String) async throws -> String {
+        guard let url = URL(string: "/v1/billing/invoices/\(escaped(id))/statement", relativeTo: baseURL) else { throw SDKError.invalidURL }
+        var req = URLRequest(url: url)
+        if !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let (data,response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw SDKError.emptyResponse }
+        let text = String(data: data, encoding: .utf8) ?? ""
+        guard (200..<300).contains(http.statusCode) else { throw SDKError.http(http.statusCode,text) }
+        return text
+    }
+
+    private func request<Input: Encodable, Output: Decodable>(_ method: String, _ path: String, body: Input, key: String? = nil, allowEmpty: Bool = false) async throws -> Output {
         guard let url = URL(string: path, relativeTo: baseURL) else { throw SDKError.invalidURL }
         var request = URLRequest(url: url); request.httpMethod = method; request.httpBody = try encoder.encode(body)
+        if let key { request.setValue(key, forHTTPHeaderField: "Idempotency-Key") }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("agent-continuity-swift/\(agentContinuitySDKVersion)", forHTTPHeaderField: "User-Agent")
         if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }

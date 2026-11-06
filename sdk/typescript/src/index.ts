@@ -1,6 +1,6 @@
 export const SDK_VERSION = "0.1.0";
 
-export interface StorageJob {id:number;task_id:string;kind:"event"|"artifact";resource_id:string;version_id?:string;target_id:string;state:"queued"|"processing"|"retry"|"stored"|"dead";attempts:number;size:number;content_hash?:string;error_code?:string}
+export interface StorageJob {id:number;task_id:string;kind:"event"|"artifact";resource_id:string;version_id?:string;target_id:string;state:"queued"|"processing"|"retry"|"stored"|"dead"|"deleted";attempts:number;size:number;content_hash?:string;error_code?:string;operation?:"archive"|"delete";legal_hold?:boolean}
 export interface StorageJobsPage {jobs:StorageJob[];next_after:number;has_more:boolean}
 
 export interface Task {
@@ -147,14 +147,24 @@ export class Client {
   }
   listStorageJobs(taskID:string,after=0):Promise<StorageJobsPage>{return this.request("GET",`/v1/tasks/${encodeURIComponent(taskID)}/storage-jobs?after=${after}`);}
   getStorageJob(taskID:string,id:number):Promise<StorageJob>{return this.request("GET",`/v1/tasks/${encodeURIComponent(taskID)}/storage-jobs/${id}`);}
+  async waitStorageJob(taskID:string,id:number,timeoutMs=120000):Promise<StorageJob>{
+    if(!Number.isFinite(timeoutMs)||timeoutMs<=0)throw new Error("Positive archive wait timeout required");
+    const deadline=Date.now()+timeoutMs;
+    while(Date.now()<deadline){const job=await this.getStorageJob(taskID,id);if(job.state==="stored")return job;if(job.state==="dead"||job.state==="deleted")throw new Error(`Archive job ${id}: ${job.state} ${job.error_code||""}`);await new Promise(resolve=>setTimeout(resolve,Math.min(1000,Math.max(0,deadline-Date.now()))));}
+    throw new Error(`Archive job ${id}: receipt timeout (upload may still finish)`);
+  }
   retryStorageJob(taskID:string,id:number):Promise<unknown>{return this.request("POST",`/v1/tasks/${encodeURIComponent(taskID)}/storage-jobs/${id}/retry`);}
   constructor(public readonly baseURL: string, public token = "", private readonly fetcher: typeof fetch = fetch) {}
 
-  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  async request<T>(method: string, path: string, body?: unknown, extraHeaders: Record<string,string> = {}): Promise<T> {
+    return JSON.parse((await this.requestText(method,path,body,extraHeaders)) || "null") as T;
+  }
+  private async requestText(method: string, path: string, body?: unknown, extraHeaders: Record<string,string> = {}): Promise<string> {
     const response = await this.fetcher(this.baseURL.replace(/\/$/, "") + path, {
       method,
       headers: {
         Accept: "application/json",
+        ...extraHeaders,
         ...(this.token ? {Authorization: `Bearer ${this.token}`} : {}),
         ...(body === undefined ? {} : {"Content-Type": "application/json"}),
         "User-Agent": `agent-continuity-typescript/${SDK_VERSION}`,
@@ -162,12 +172,23 @@ export class Client {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await response.text();
-    const value = text ? JSON.parse(text) : undefined;
     if (!response.ok) {
+      let value; try {value=JSON.parse(text);} catch {value=undefined;}
       throw new APIError(response.status, value?.error?.code ?? "http_error", value?.error?.message ?? response.statusText);
     }
-    return value as T;
+    return text;
   }
+
+  listInvoices(): Promise<Record<string,unknown>> {return this.request("GET","/v1/billing/invoices?limit=200");}
+  getInvoice(id:string): Promise<Record<string,unknown>> {return this.request("GET",`/v1/billing/invoices/${encodeURIComponent(id)}`);}
+  quoteInvoice(period:{billing_account_id:string;period_start:string;period_end:string}): Promise<Record<string,unknown>> {return this.request("POST","/v1/billing/quote",period);}
+  issueInvoice(period:{billing_account_id:string;period_start:string;period_end:string},key:string): Promise<Record<string,unknown>> {return this.request("POST","/v1/billing/invoices",period,{"Idempotency-Key":key});}
+  createPayment(id:string,provider:string,key:string): Promise<Record<string,unknown>> {return this.request("POST",`/v1/billing/invoices/${encodeURIComponent(id)}/payments`,{provider},{"Idempotency-Key":key});}
+  reconcilePayment(id:string,payment:string): Promise<Record<string,unknown>> {return this.request("POST",`/v1/billing/invoices/${encodeURIComponent(id)}/payments/${encodeURIComponent(payment)}/reconcile`);}
+  /** Persist/reuse key across retries; approval remains a merchant operation. */
+  requestRefund(id:string,payment:string,amountMinor:number,reason:string,key:string): Promise<Record<string,unknown>> {return this.request("POST",`/v1/billing/invoices/${encodeURIComponent(id)}/refunds`,{payment_id:payment,amount_minor:amountMinor,reason},{"Idempotency-Key":key});}
+  reconcileRefund(id:string,refund:string): Promise<Record<string,unknown>> {return this.request("POST",`/v1/billing/invoices/${encodeURIComponent(id)}/refunds/${encodeURIComponent(refund)}/reconcile`);}
+  invoiceStatement(id:string): Promise<string> {return this.requestText("GET",`/v1/billing/invoices/${encodeURIComponent(id)}/statement`);}
 
   health(): Promise<void> {
     return this.request("GET", "/v1/health/ready");

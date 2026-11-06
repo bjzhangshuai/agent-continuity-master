@@ -10,6 +10,7 @@
   },
   "concurrency": 4, "poll_seconds": 2, "timeout_seconds": 60, "max_attempts": 6,
   "max_pending_jobs": 100000, "max_staging_bytes": 10737418240,
+  "lifecycle": {"allow_delete": false, "minimum_retention_days": 30, "cache_ttl_seconds": 0},
   "targets": [
     {"id":"aws-v1","provider":"aws","endpoint":"https://s3.us-east-1.amazonaws.com","bucket":"YOUR-PRIVATE-BUCKET","region":"us-east-1","prefix":"continuity","access_key_file":"/run/archive/aws-access-key","secret_key_file":"/run/archive/aws-secret-key"},
     {"id":"oss-v1","provider":"alicloud","endpoint":"https://oss-cn-hangzhou.aliyuncs.com","bucket":"YOUR-PRIVATE-BUCKET","region":"cn-hangzhou","prefix":"continuity","access_key_file":"/run/archive/oss-access-key","secret_key_file":"/run/archive/oss-secret-key"},

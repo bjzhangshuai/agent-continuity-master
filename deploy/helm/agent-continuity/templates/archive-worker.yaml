@@ -2,7 +2,7 @@
 {{- if ne .Values.artifactStorage.backend "local" }}
 {{- fail "archive requires durable local/shared staging, not the legacy synchronous S3 backend" }}
 {{- end }}
-{{- if and (ne .Values.artifactStorage.accessMode "ReadWriteMany") (or (gt (int .Values.archive.workerReplicas) 1) .Values.archive.autoscaling.enabled) }}
+{{- if and (ne .Values.artifactStorage.accessMode "ReadWriteMany") (or (gt (int .Values.archive.workerReplicas) 1) .Values.archive.autoscaling.enabled .Values.archive.queueAutoscaling.enabled) }}
 {{- fail "distributed archive workers require ReadWriteMany staging; dev ReadWriteOnce supports one worker on the API node" }}
 {{- end }}
 apiVersion: apps/v1
@@ -13,7 +13,11 @@ metadata:
 spec:
   replicas: {{ .Values.archive.workerReplicas }}
   revisionHistoryLimit: 2
+  {{- if eq .Values.artifactStorage.accessMode "ReadWriteMany" }}
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 1, maxUnavailable: 0}}
+  {{- else }}
   strategy: {type: Recreate}
+  {{- end }}
   selector:
     matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: archive-worker}
   template:
@@ -21,13 +25,24 @@ spec:
       annotations:
         continuity.agent-continuity.io/image-id: {{ .Values.image.buildID | quote }}
         checksum/archive-config: {{ toJson .Values.archive.config | sha256sum }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secrets: {{ include "agent-continuity.secretChecksum" . }}
       labels:
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: archive-worker
         app.kubernetes.io/part-of: agent-continuity
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
       {{- if ne .Values.artifactStorage.accessMode "ReadWriteMany" }}
       affinity:
@@ -46,6 +61,7 @@ spec:
           envFrom:
             - configMapRef: {name: {{ include "agent-continuity.fullname" . }}-config}
           env:
+            - {name: CONTINUITY_ARCHIVE_HEALTH_ADDRESS, value: ":8081"}
             - {name: GOMAXPROCS, value: "2"}
             - {name: GOMEMLIMIT, value: 192MiB}
             - name: CONTINUITY_DATABASE_URL
@@ -60,6 +76,12 @@ spec:
             - {name: CONTINUITY_ARCHIVE_CONFIG_FILE, value: /run/archive/config.json}
             {{- end }}
           volumeMounts:
+            {{- if .Values.archive.storageSecret }}
+            - {name: archive-storage, mountPath: /run/archive-storage, readOnly: true}
+            {{- end }}
+            {{- if .Values.databaseTLS.existingSecret }}
+            - {name: database-tls, mountPath: /run/database-tls, readOnly: true}
+            {{- end }}
             - {name: artifacts, mountPath: /data}
             - {name: tmp, mountPath: /tmp}
             {{- if .Values.archive.existingSecret }}
@@ -69,7 +91,19 @@ spec:
             - {name: broker-secrets, mountPath: /run/archive-broker, readOnly: true}
             {{- end }}
           resources: {{- toYaml .Values.archive.workerResources | nindent 12 }}
+          ports: [{name: metrics, containerPort: 8081}]
+          startupProbe: {httpGet: {path: /live, port: metrics}, failureThreshold: 60, periodSeconds: 2}
+          livenessProbe: {httpGet: {path: /live, port: metrics}, periodSeconds: 10, timeoutSeconds: 2}
+          readinessProbe: {httpGet: {path: /ready, port: metrics}, periodSeconds: 5, timeoutSeconds: 3}
       volumes:
+        {{- if .Values.archive.storageSecret }}
+        - name: archive-storage
+          secret: {secretName: {{ .Values.archive.storageSecret }}, defaultMode: 0440}
+        {{- end }}
+        {{- if .Values.databaseTLS.existingSecret }}
+        - name: database-tls
+          secret: {secretName: {{ .Values.databaseTLS.existingSecret }}, defaultMode: 0440}
+        {{- end }}
         - name: artifacts
           persistentVolumeClaim:
             claimName: {{ .Values.artifactStorage.existingClaim | default (printf "%s-artifacts" (include "agent-continuity.fullname" .)) }}
@@ -98,5 +132,25 @@ spec:
       resource:
         name: cpu
         target: {type: Utilization, averageUtilization: {{ .Values.archive.autoscaling.targetCPUUtilizationPercentage }}}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agent-continuity.fullname" . }}-archive-worker
+  labels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: archive-worker}
+spec:
+  selector: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: archive-worker}
+  ports: [{name: metrics, port: 8081, targetPort: metrics}]
+{{- if .Values.archive.workerPDB.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "agent-continuity.fullname" . }}-archive-worker
+spec:
+  minAvailable: {{ .Values.archive.workerPDB.minAvailable }}
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: archive-worker}
 {{- end }}
 {{- end }}

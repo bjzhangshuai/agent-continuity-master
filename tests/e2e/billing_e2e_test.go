@@ -1,8 +1,11 @@
 package e2e
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/agent-continuity/agent-continuity-master/pkg/client"
 	"github.com/agent-continuity/agent-continuity-master/pkg/protocol"
 	"net/http"
 	"net/url"
@@ -49,12 +52,63 @@ func TestBillingPaymentJourney(t *testing.T) {
 	}
 	var account protocol.BillingAccount
 	_ = json.Unmarshal(call("POST", "/v1/billing/accounts", map[string]string{"plan": "pro", "currency": "CNY"}, 201, ""), &account)
-	call("POST", "/v1/tasks", map[string]string{"title": "Billing E2E billable task", "objective": "Verify local payment accounting without real money"}, 201, "")
-	input := map[string]any{"billing_account_id": account.ID, "period_start": time.Now().Add(-time.Hour), "period_end": time.Now()}
+	var archiveTask protocol.Task
+	_ = json.Unmarshal(call("POST", "/v1/tasks", map[string]string{"title": "归档 → 账单 → 支付回执 E2E", "objective": "Verify local payment accounting without real money"}, 201, ""), &archiveTask)
+	var archiveConfig struct {
+		Enabled bool `json:"enabled"`
+	}
+	_ = json.Unmarshal(call("GET", "/v1/storage/config", nil, 200, ""), &archiveConfig)
+	if archiveConfig.Enabled {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		sdk := client.New(base, token)
+		payload := []byte("# K8s 闭环测试\nSDK 接收 → JetStream → Worker → 对象存储 → 存储用量 → 账单与回执。")
+		if _, err := sdk.UploadContent(ctx, archiveTask.ID, "billing-archive", "v1", "conversation.md", "text/markdown", payload, ""); err != nil {
+			t.Fatal(err)
+		}
+		page, err := sdk.ListStorageJobs(ctx, archiveTask.ID, 0)
+		if err != nil || len(page.Jobs) != 1 {
+			t.Fatalf("durable outbox: %+v %v", page, err)
+		}
+		job, err := sdk.WaitStorageJob(ctx, archiveTask.ID, page.Jobs[0].ID, 40*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if expected := os.Getenv("CONTINUITY_E2E_ARCHIVE_TARGET"); expected != "" && job.TargetID != expected {
+			t.Fatalf("archive routed to %s, expected %s", job.TargetID, expected)
+		}
+		body := call("GET", fmt.Sprintf("/v1/tasks/%s/storage-jobs/%d/content", archiveTask.ID, job.ID), nil, 200, "")
+		if !bytes.Equal(body, payload) {
+			t.Fatal("cloud readback differs")
+		}
+	}
+	// Use the service's clock: Rancher VM and host clocks can temporarily drift.
+	clock, err := http.Head(base + "/v1/health/ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock.Body.Close()
+	serverTime, err := http.ParseTime(clock.Header.Get("Date"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := serverTime.Add(time.Second) // include current second; API allows <=1s tolerance
+	input := map[string]any{"billing_account_id": account.ID, "period_start": end.Add(-time.Hour), "period_end": end}
 	var doc protocol.BillingDocument
 	_ = json.Unmarshal(call("POST", "/v1/billing/invoices", input, 201, "e2e-invoice-key"), &doc)
 	if doc.Invoice.AmountMinor <= 0 {
 		t.Fatal("bill has no consumption")
+	}
+	if archiveConfig.Enabled {
+		seen := map[string]bool{}
+		for _, line := range doc.Invoice.Lines {
+			seen[line.Metric] = true
+		}
+		for _, metric := range []string{"storage.archive.bytes", "storage.retained.byte_hours", "storage.download.bytes"} {
+			if !seen[metric] {
+				t.Fatal("invoice missing", metric)
+			}
+		}
 	}
 	id := doc.Invoice.ID
 	var again protocol.BillingDocument

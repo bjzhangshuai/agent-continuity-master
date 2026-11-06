@@ -122,8 +122,8 @@ function formatBytes(value) {
 }
 
 function metricLabel(metric) {
-  const zh = {"api.mutation": "API 变更操作", "artifact.bytes": "产物存储与传输"};
-  const en = {"api.mutation": "API mutations", "artifact.bytes": "Artifact storage & transfer"};
+  const zh = {"api.mutation": "API 变更操作", "artifact.bytes": "产物上传字节", "storage.archive.bytes":"逻辑归档量", "storage.retained.byte_hours":"归档保留量 × 小时", "storage.download.bytes":"对象存储成功回源量"};
+  const en = {"api.mutation": "API mutations", "artifact.bytes": "Artifact upload bytes", "storage.archive.bytes":"Logical archived bytes", "storage.retained.byte_hours":"Retained byte-hours", "storage.download.bytes":"Verified origin-read bytes"};
   return (state.lang === "zh" ? zh : en)[metric] || metric;
 }
 
@@ -182,11 +182,13 @@ function pill(text, kind = "neutral") {
 }
 
 function taskEventCount(task) {
+  if (Number.isFinite(Number(task.event_count))) return Number(task.event_count);
   const value = Number(task.metadata?.event_volume);
   return Number.isFinite(value) ? value : (task.metadata?.demo_seed ? 6 : task.head_event_ids?.length || 0);
 }
 
 function taskArtifactCount(task) {
+  if (Number.isFinite(Number(task.artifact_count))) return Number(task.artifact_count);
   const value = Number(task.metadata?.artifact_count);
   return Number.isFinite(value) ? value : (task.metadata?.demo_seed ? 1 : 0);
 }
@@ -398,8 +400,9 @@ function renderTaskList() {
 
 async function loadTasks() {
   try {
-    const data = await api("/v1/tasks");
+    const [data, devices] = await Promise.all([api("/v1/tasks"), api("/v1/devices")]);
     state.tasks = data.tasks || [];
+    state.devices = devices.devices || [];
     renderTaskList();
     $("auth-status").textContent = tr(`已连接 · ${state.tasks.length} 个可见任务`, `Connected · ${state.tasks.length} visible task(s)`);
   } catch (error) { toast(error.message); }
@@ -467,6 +470,8 @@ async function loadTask(task) {
     const deviceIdentity = el("span", "", "origin-device-name");
     deviceIdentity.append(el("span", tr("来源设备", "Origin device"), "meta"), el("strong", deviceName(task.origin_device)));
     deviceSummary.append(deviceIdentity, pill(devicePlatform(originDevice), "neutral"), el("code", task.origin_device || "-"));
+    task.event_count = (events.events || []).length;
+    task.artifact_count = (artifacts.artifacts || []).length;
     summary.append(summaryTags, el("p", task.objective), el("strong", providerRoute(task), "route-providers"), deviceSummary, el("p", tr(`${taskEventCount(task)} 个事件 · ${taskArtifactCount(task)} 个产物 · ${task.metadata?.cross_agent_handoffs || 0} 次跨 Agent 接力 · 更新于 ${formatDate(task.updated_at)}`, `${taskEventCount(task)} events · ${taskArtifactCount(task)} artifacts · ${task.metadata?.cross_agent_handoffs || 0} handoffs · updated ${formatDate(task.updated_at)}`), "muted"));
     renderItems($("events"), events.events, (event) => {
       const item = el("div", "", "feed-item timeline-item");

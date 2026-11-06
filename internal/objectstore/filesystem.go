@@ -109,6 +109,35 @@ type contextReader struct {
 	r   io.Reader
 }
 
+func (p *filesystem) Delete(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !safeKey(key) {
+		return errors.New("invalid object key")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	root, err := os.OpenRoot(p.root)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	err = root.Remove(filepath.FromSlash(key))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	directory, err := root.Open(filepath.Dir(key))
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
+}
+
 func (r *contextReader) Read(b []byte) (int, error) {
 	if err := r.ctx.Err(); err != nil {
 		return 0, err

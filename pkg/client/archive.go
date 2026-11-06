@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/agent-continuity/agent-continuity-master/pkg/protocol"
 	"net/url"
+	"time"
 )
 
 type StorageJob struct {
@@ -20,7 +21,37 @@ type StorageJob struct {
 	Size        int64  `json:"size"`
 	ContentHash string `json:"content_hash"`
 	ErrorCode   string `json:"error_code"`
+	Operation   string `json:"operation"`
+	LegalHold   bool   `json:"legal_hold"`
 }
+
+// WaitStorageJob waits for a durable receipt, not merely HTTP upload acceptance.
+// It never retries a dead letter automatically or hides authentication errors.
+func (c *Client) WaitStorageJob(ctx context.Context, taskID string, id int64, timeout time.Duration) (StorageJob, error) {
+	if timeout <= 0 {
+		return StorageJob{}, fmt.Errorf("positive archive wait timeout required")
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	for {
+		j, err := c.GetStorageJob(ctx, taskID, id)
+		if err != nil {
+			return j, err
+		}
+		switch j.State {
+		case "stored":
+			return j, nil
+		case "dead", "deleted":
+			return j, fmt.Errorf("archive job %d ended in %s: %s", id, j.State, j.ErrorCode)
+		}
+		select {
+		case <-ctx.Done():
+			return j, ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+
 type StorageJobsPage struct {
 	Jobs      []StorageJob `json:"jobs"`
 	NextAfter int64        `json:"next_after"`

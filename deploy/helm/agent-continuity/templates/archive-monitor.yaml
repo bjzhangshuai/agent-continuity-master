@@ -1,0 +1,36 @@
+{{- if and .Values.archive.enabled .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "agent-continuity.fullname" . }}-archive-worker
+  labels: {{- include "agent-continuity.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: archive-worker}
+  endpoints: [{port: metrics, path: /metrics, interval: {{ .Values.serviceMonitor.interval }}}]
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "agent-continuity.fullname" . }}-archive-worker
+  labels: {{- include "agent-continuity.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: continuity-archive
+      rules:
+        - alert: ContinuityArchiveDeadLetters
+          expr: max(continuity_archive_jobs{namespace="{{ .Release.Namespace }}",state="dead"}) > 0
+          for: 5m
+          labels: {severity: warning}
+          annotations: {summary: "Archive dead letters require replay after fixing the provider", runbook_url: "docs/archive-production.md"}
+        - alert: ContinuityArchiveBacklogAge
+          expr: max(continuity_archive_oldest_pending_seconds{namespace="{{ .Release.Namespace }}"}) > 600
+          for: 5m
+          labels: {severity: warning}
+          annotations: {summary: "Archive backlog oldest message exceeds ten minutes", runbook_url: "docs/archive-production.md"}
+        - alert: ContinuityArchiveWorkersUnavailable
+          expr: kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}",deployment="{{ include "agent-continuity.fullname" . }}-archive-worker"} < 1
+          for: 3m
+          labels: {severity: critical}
+          annotations: {summary: "No ready archive workers", runbook_url: "docs/archive-production.md"}
+{{- end }}
