@@ -72,8 +72,9 @@ MinIO 与 mc 的旧公开镜像在本轮 CI 中已无法从 Docker Hub/Quay 拉�
 - 3 条真实 PostgreSQL/JetStream integration 通过：事件事务与断线恢复；签名对话与 SDK 内容 → Outbox → 持久 JetStream 重启 → 双消费者 → 对象下载/失败重放；编排恢复、多个存储连接抢占与用量事务回滚。测试只使用专用测试库与进程内临时 broker。
 - 官方 A2A Go SDK `v2.6.0` 通过 Agent Card/SendMessage/GetTask/ListTasks；远程 A2A 模拟器验证“服务端已接收但客户端遇到 503”后沿用原 messageId 恢复。
 - Go/Python/TypeScript/Swift/Kotlin/.NET SDK 测试与编译通过；CodeBuddy bridge 测试通过。VSIX 已重新打包，含本轮 Python SDK 和执行报告恢复逻辑。
-- 项目工具链固定 Go 1.27.3（模块最低 Go 1.26.10），容器构建使用同版本；升级 x/net 至 0.60.0 修复 HTTP/2 问题。仅本项目配置与模块缓存变化，系统 Go 未升级。修复依据：[Go 证书信任公告](https://pkg.go.dev/vuln/GO-2026-6809)、[HTTP/2 公告](https://pkg.go.dev/vuln/GO-2026-6617)。
+- 项目工具链固定 Go 1.27.3（模块最低 Go 1.26.10），容器构建使用同版本；升级 x/net 至 0.62.0，同时包含 HTTP/2 与 HTML 解析/渲染安全修复。仅本项目配置与模块缓存变化，系统 Go 未升级。修复依据：[Go 证书信任公告](https://pkg.go.dev/vuln/GO-2026-6809)、[HTTP/2 公告](https://pkg.go.dev/vuln/GO-2026-6617)、[HTML 解析公告](https://pkg.go.dev/vuln/GO-2026-6860)、[HTML 渲染公告](https://pkg.go.dev/vuln/GO-2026-6866)。
 - `gosec` 静态安全扫描、`go mod verify` 模块校验以及变更文件凭据特征扫描通过。
+- GitHub Runner 已从固定源码构建 MinIO 与 mc，通过 S3 建桶、上传/下载内容比对以及真实 Compose 跨设备接续 E2E；未配置支付/财务夹具的 Compose 测试显式跳过，这些能力由上述独立 HTTP E2E 验收。
 - dev/staging/production Helm 合同、四云 profile 渲染/生产危险配置拒绝、实际 HTTP 响应 JSON Schema 校验通过。NATS、MinIO、可选监控/伸缩依赖继续通过渲染检查。
 - 临时内存服务 `127.0.0.1:18082` 的浏览器验收：账号登录、审批、三个 Agent 完成接力、分账展示、模拟开票下载；下载内容解析为 JSON 且 `legally_valid_tax_invoice=false`。验收服务已停止。
 - Rancher 前后均 Ready，无 Memory/Disk/PIDPressure；96/110 活跃 Pod，0 个未分配 Pending。项目 API、归档 Worker、NATS、PostgreSQL、MinIO 的运行 Pod 重启次数未增加；没有发布 Helm release、重启集群、创建额外 Pod或改变其他项目。
