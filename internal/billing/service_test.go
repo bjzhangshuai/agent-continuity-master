@@ -254,3 +254,19 @@ func TestEnvironmentExpiryAndOrganizationIsolation(t *testing.T) {
 		t.Fatal("custom provider omitted from capability discovery")
 	}
 }
+
+func TestAdjacentUsageWindowsNormalizeNanoseconds(t *testing.T) {
+	s, a, _, _ := fixture(t)
+	boundary := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond).Add(789 * time.Nanosecond)
+	first, e := s.Issue(context.Background(), a, boundary.Add(-time.Hour), boundary, "nanosecond-first")
+	if e != nil {
+		t.Fatal(e)
+	}
+	second, e := s.Issue(context.Background(), a, boundary.Truncate(time.Microsecond), boundary.Add(time.Minute), "nanosecond-second")
+	if e != nil {
+		t.Fatal("adjacent HTTP/service precision falsely overlaps", e)
+	}
+	if !first.Invoice.PeriodEnd.Equal(second.Invoice.PeriodStart) {
+		t.Fatal("different accounting precision")
+	}
+}

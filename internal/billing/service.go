@@ -131,6 +131,8 @@ func New(repo Repository, providers *payments.Registry, book PriceBook, baseURL 
 	return &Service{Repo: repo, Providers: providers, PriceBook: book, BaseURL: strings.TrimRight(baseURL, "/"), signingKey: append([]byte(nil), key...), now: time.Now}
 }
 func (s *Service) Quote(ctx context.Context, b protocol.BillingAccount, from, to time.Time) (protocol.BillingInvoice, error) {
+	// Keep internal callers and HTTP callers on the database timestamp precision.
+	from, to = from.UTC().Truncate(time.Microsecond), to.UTC().Truncate(time.Microsecond)
 	if !from.Before(to) || from.IsZero() || to.After(s.now().Add(time.Second)) || to.Sub(from) > 366*24*time.Hour {
 		return protocol.BillingInvoice{}, fmt.Errorf("%w: use a past usage window of at most 366 days", ErrInvalid)
 	}

@@ -77,6 +77,21 @@ func TestArchiveJetStreamTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This test changes global queue admission, so restore it before the store closes.
+	var oldEnabled bool
+	var oldTarget string
+	var oldRoutes []byte
+	var oldCapacity int
+	if err = sql.QueryRow(ctx, `SELECT enabled,default_target,organization_targets,max_pending FROM archive_control WHERE singleton`).Scan(&oldEnabled, &oldTarget, &oldRoutes, &oldCapacity); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, e := sql.Exec(cleanup, `UPDATE archive_control SET enabled=$1,default_target=$2,organization_targets=$3,max_pending=$4 WHERE singleton`, oldEnabled, oldTarget, oldRoutes, oldCapacity); e != nil {
+			t.Errorf("restore test queue configuration: %v", e)
+		}
+	}()
 	q := store.ArchiveQueue()
 	config.Lifecycle.AllowDelete = true // test-owned objects only
 	config.DefaultTarget = fmt.Sprintf("archive-test-%d", time.Now().UnixNano())

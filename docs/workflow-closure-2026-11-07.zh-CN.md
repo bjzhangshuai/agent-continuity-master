@@ -66,6 +66,7 @@ Go/Python/TypeScript/Swift/Kotlin/.NET SDK 新增 createRun/getRun/controlRun/is
 
 - `GOMAXPROCS=2 go test -race -p 2 ./...` 和 `go vet -p 2 ./...` 通过；最后修改的 HTTP/SDK/适配器包再次通过 race 回归。环境变量门控的数据库/HTTP 测试另行启用执行，未把默认跳过当作验收。
 - 独立数据库 `continuity_test_closure_20261107`：7 条 HTTP E2E 全部通过，覆盖旧支付/退款/门户/资金台账，以及新增标准协议和编排/分账/KMS 链路。新链路实际检查 100 元付款、10 元佣金、60 元提现成功、50 元退款后的 15 元待追缴、分账冲回、蓝字与红字模拟票据下载。
+- Linux CI 反馈已修复：服务层统一账期微秒精度，归档测试结束恢复全局 admission 配置，更新可解析的 Trivy Action，并在干净 CI 环境安装 Python SDK 声明的依赖；同库运行三项 integration 后再跑新功能 E2E 的夹具已在全新专用数据库通过。
 - 3 条真实 PostgreSQL/JetStream integration 通过：事件事务与断线恢复；签名对话与 SDK 内容 → Outbox → 持久 JetStream 重启 → 双消费者 → 对象下载/失败重放；编排恢复、多个存储连接抢占与用量事务回滚。测试只使用专用测试库与进程内临时 broker。
 - 官方 A2A Go SDK `v2.6.0` 通过 Agent Card/SendMessage/GetTask/ListTasks；远程 A2A 模拟器验证“服务端已接收但客户端遇到 503”后沿用原 messageId 恢复。
 - Go/Python/TypeScript/Swift/Kotlin/.NET SDK 测试与编译通过；CodeBuddy bridge 测试通过。VSIX 已重新打包，含本轮 Python SDK 和执行报告恢复逻辑。

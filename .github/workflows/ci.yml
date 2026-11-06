@@ -27,7 +27,9 @@ jobs:
           pip install jsonschema==4.26.0
           python scripts/test-protocol-contracts.py
       - name: Python SDK
-        run: cd sdk/python && PYTHONPATH=src python -m unittest discover -s tests -v
+        run: |
+          python -m pip install ./sdk/python
+          cd sdk/python && PYTHONPATH=src python -m unittest discover -s tests -v
       - name: TypeScript SDK
         run: cd sdk/typescript && npm ci --ignore-scripts && npm test
       - name: Race detector
@@ -66,7 +68,7 @@ jobs:
           format: spdx-json
           output-file: sbom.spdx.json
       - name: Container vulnerability scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: 'agent-continuity:ci'
           severity: 'CRITICAL,HIGH'
