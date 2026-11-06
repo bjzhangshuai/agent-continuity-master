@@ -36,5 +36,18 @@ until curl --fail --silent "http://127.0.0.1:$port/v1/health/ready" >/dev/null; 
   sleep 0.25
 done
 
+# Build the matching upstream client and exercise S3 against this test-only store.
+docker --context "$docker_context" build --target mc --file "$repository_dir/deploy/images/objectstore/Dockerfile" --tag agent-continuity-mc:source-77f82e18b540 "$repository_dir"
+MINIO_ROOT_USER="$minio_root_user" MINIO_ROOT_PASSWORD="$minio_root_password" \
+  docker --context "$docker_context" run --rm --network "${project_name}_continuity" \
+    --env MINIO_ROOT_USER --env MINIO_ROOT_PASSWORD --entrypoint /bin/sh \
+    agent-continuity-mc:source-77f82e18b540 -ec '
+      mc alias set probe http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" --api S3v4 >/dev/null
+      mc mb probe/continuity-e2e-probe >/dev/null
+      printf "%s" "continuity-s3-roundtrip" | mc pipe probe/continuity-e2e-probe/probe.txt >/dev/null
+      test "$(mc cat probe/continuity-e2e-probe/probe.txt)" = "continuity-s3-roundtrip"
+      echo "PASS: source-built MinIO and mc S3 upload/download"
+    '
+
 CONTINUITY_E2E_URL="http://127.0.0.1:$port" CONTINUITY_E2E_BOOTSTRAP_TOKEN="$bootstrap_token" \
   go test -count=1 -v ./tests/e2e

@@ -93,3 +93,15 @@ for name in ('workflow-secrets','kms-secrets'):
     assert next(m for m in container['volumeMounts'] if m['name']==name)['readOnly']
     assert next(v for v in server['volumes'] if v['name']==name)['secret']['defaultMode']==0o440
 print('workflow and KMS Secret mounts, configuration and least privilege PASS')
+
+# Source-built test images must keep the vendored Helm entrypoint and both clients.
+infra = yaml.safe_load((ROOT/'deploy/helm/agent-continuity-infra/values.yaml').read_text())
+image_dockerfile=(ROOT/'deploy/images/objectstore/Dockerfile').read_text()
+assert infra['minio']['image']['repository']=='agent-continuity-minio'
+assert infra['minio']['image']['tag']=='source-7aac2a2c5b7c'
+assert infra['minio']['mcImage']['repository']=='agent-continuity-mc'
+assert infra['minioBootstrap']['image']=='agent-continuity-mc:source-77f82e18b540'
+assert '/usr/bin/docker-entrypoint.sh' in image_dockerfile
+assert '7aac2a2c5b7c882e68c1ce017d8256be2feea27f' in image_dockerfile
+assert '77f82e18b5401a65958f1619df6ebb994634bd88' in image_dockerfile
+print('source-pinned MinIO/mc image references and Helm entrypoint PASS')

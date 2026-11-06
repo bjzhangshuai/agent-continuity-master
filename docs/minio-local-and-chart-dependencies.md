@@ -11,7 +11,7 @@
 | API、归档 Worker、迁移 Job | agent-continuity | 开启 |
 | PostgreSQL | 应用内置 StatefulSet，postgres:16-alpine | 复用原实例 |
 | NATS JetStream（Argo Events 生态） | 开发：应用内置；生产：infra 的官方 nats 2.14.6 | 复用原单节点 Broker，不再创建一套 |
-| MinIO | infra 的本地修订 minio 5.4.0-continuity.1；服务端 RELEASE.2025-09-07T16-13-09Z | 新增一个副本 |
+| MinIO | infra 的本地修订 minio 5.4.0-continuity.1；服务端固定源码 7aac2a2c5b7c；mc 固定源码 77f82e18b540 | 新增一个副本 |
 | Prometheus Operator、Prometheus、Grafana、kube-state-metrics | infra 的 kube-prometheus-stack 88.6.3 | 关闭，可选安装 |
 | KEDA | infra 的 keda 2.20.2 | 关闭，可选安装 |
 | OpenTelemetry Collector | infra 的 opentelemetry-collector 0.172.0 | 关闭，可选安装 |
@@ -49,7 +49,7 @@ MinIO 上限 CPU 500m、内存 512Mi；新增 PVC 2Gi，测试桶硬配额 256Mi
 - 本地服务证书有效期一年，CA 十年；不会自动续期。到期前轮换 `continuity-minio-tls` 的 public.crt/private.key/ca.crt 及 client Secret 的 ca.crt，重启 MinIO 并更新应用 `secretRevision` 后升级。不要删除根账号 Secret 后重新随机生成，尤其不能丢失数据卷对应的密钥与目标配置。
 - MinIO PVC 与三份 Secret 标记 `helm.sh/resource-policy: keep`。卸载测试 release 不自动销毁数据；清理必须另行核对确切资源。它们的备份仍需另做，keep 不是备份。
 
-MinIO 社区仓库已于 2026-04-25 归档，当前服务镜像是锁定的历史版本。这里只作为隔离的本地 S3 协议测试；生产选型应评估受维护版本、漏洞更新和许可要求。服务端为 AGPLv3；本地 Chart 修订与原始来源见 `deploy/helm/vendor/minio/CONTINUITY-PATCHES.md`。[上游仓库](https://github.com/minio/minio)、[上游 Chart](https://github.com/minio/minio/tree/master/helm/minio)。
+MinIO 社区仓库已于 2026-04-25 归档，当前测试镜像从锁定的历史源码构建，构建方式见 [镜像说明](../deploy/images/objectstore/README.md)。这里只作为隔离的本地 S3 协议测试；生产选型应评估受维护版本、漏洞更新和许可要求。服务端为 AGPLv3；本地 Chart 修订与原始来源见 `deploy/helm/vendor/minio/CONTINUITY-PATCHES.md`。[上游仓库](https://github.com/minio/minio)、[上游 Chart](https://github.com/minio/minio/tree/master/helm/minio)。
 
 ## 如何看完整演示
 

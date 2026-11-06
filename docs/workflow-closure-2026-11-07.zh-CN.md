@@ -38,7 +38,7 @@ Go/Python/TypeScript/Swift/Kotlin/.NET SDK 新增 createRun/getRun/controlRun/is
 
 ## 部署和扩容
 
-新增迁移 `016_operations` 保存编排、分账、票据和加密密钥库，带到期索引、run 时间游标及任务查询索引。Helm 应用 chart 版本 `0.3.0`，无需新增数据库、队列或 Operator：现有 PostgreSQL 保存业务状态，已有 NATS JetStream 继续承担附件归档队列。Worker 随 API 副本运行；CAS/租约防止多个副本提交同一步骤。编排调度持久化扫描不是替换上传链路的 JetStream。
+新增迁移 `016_operations` 保存编排、分账、票据和加密密钥库，带到期索引、run 时间游标及任务查询索引。Helm 应用和基础设施 chart 版本均为 `0.3.0`，无需新增数据库、队列或 Operator：现有 PostgreSQL 保存业务状态，已有 NATS JetStream 继续承担附件归档队列。Worker 随 API 副本运行；CAS/租约防止多个副本提交同一步骤。编排调度持久化扫描不是替换上传链路的 JetStream。
 
 开发叠加 `deploy/environments/dev/workflows.yaml` 即启用模拟执行器和模拟 KMS；**本轮没有把这个 overlay 发布到现有本地 release**。生产 profile 引用 `continuity-workflows` 和 `continuity-kms` Secret，分别挂载 `/run/workflows`、`/run/kms`，只读 `0440`，纳入 Secret rollout checksum。Secret 需有 `config.json` 和其中引用的凭据文件。预检验证文件映射并拒绝生产模拟模式。
 
@@ -47,6 +47,8 @@ Go/Python/TypeScript/Swift/Kotlin/.NET SDK 新增 createRun/getRun/controlRun/is
 - `CONTINUITY_WORKFLOW_CONFIG[_FILE]`、`CONTINUITY_KMS_CONFIG[_FILE]` 可直接用于 VM/容器。配置启动时解析，凭据文件由云 Secret/CSI 更新，KMS 每次调用重新读取。
 - KMS 轮换：先新增唯一版本 ID，保留旧 key，修改 current 或 `tenant_keys:{"acct_id":"new-version"}`，滚动服务；对存量密钥调用 rewrap；确认旧 key 不再被引用后在云 IAM 和配置中撤销。不得把旧版本 ID 指向另一把密钥。Webhook 密钥可轮换重建；存量 v1 本地主密钥密文仍能读取迁移。
 - 备份必须包含 PostgreSQL、仍被引用的云 KMS key/本地主密钥、Secret 配置及对象存储。撤销旧密钥前先做恢复验证。
+
+MinIO 与 mc 的旧公开镜像在本轮 CI 中已无法从 Docker Hub/Quay 拉取。测试部署改为上游固定提交源码构建，保留源码快照、许可证和 Helm 入口；Compose 会构建 MinIO，Rancher 安装脚本先构建两个指定镜像。配置与手动构建方式见 `deploy/images/objectstore/README.md`；本轮构建只在 GitHub Runner 执行，未替换本地 MinIO。
 
 发布包包含两个 chart、已有六项可选基础依赖、迁移、六语言 SDK、客户端二进制、VSIX、协议与示例。镜像和真实云资源/服务商账号不在压缩包内；部署需构建或拉取镜像及准备外部服务。它不是离线镜像包。
 

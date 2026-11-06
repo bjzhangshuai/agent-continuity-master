@@ -57,6 +57,7 @@ fi
 python3 "$repository_dir/scripts/check-local-capacity.py" --context "$context"
 
 echo "Building a local image with Rancher Desktop's isolated Docker context..."
+CONTINUITY_DOCKER_CONTEXT=rancher-desktop "$repository_dir/scripts/build-objectstore-images.sh"
 docker --context rancher-desktop build --tag agent-continuity:dev "$repository_dir"
 image_id=$(docker --context rancher-desktop image inspect agent-continuity:dev --format '{{.Id}}')
 case "$image_id" in

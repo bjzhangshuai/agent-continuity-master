@@ -53,7 +53,8 @@ minio:
   fullnameOverride: continuity-minio
   mode: standalone
   replicas: 1
-  image: {repository: minio/minio, tag: RELEASE.2025-09-07T16-13-09Z, pullPolicy: IfNotPresent}
+  image: {repository: agent-continuity-minio, tag: source-7aac2a2c5b7c, pullPolicy: IfNotPresent}
+  mcImage: {repository: agent-continuity-mc, tag: source-77f82e18b540, pullPolicy: IfNotPresent}
   existingSecret: continuity-minio-root
   tls: {enabled: true, certSecret: continuity-minio-tls}
   trustedCertsSecret: ""
@@ -85,7 +86,7 @@ minioBootstrap:
   bucket: continuity-archive
   prefix: continuity
   quota: 256MiB
-  image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+  image: agent-continuity-mc:source-77f82e18b540
   resources:
     requests: {cpu: 25m, memory: 32Mi}
     limits: {cpu: 250m, memory: 128Mi}

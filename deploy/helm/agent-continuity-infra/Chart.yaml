@@ -2,7 +2,7 @@ apiVersion: v2
 name: agent-continuity-infra
 description: Optional durable NATS, local MinIO, metrics, tracing and autoscaling dependencies
 type: application
-version: 0.2.0
+version: 0.3.0
 appVersion: "2.14.6"
 dependencies:
   - name: nats
